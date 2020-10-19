@@ -35,8 +35,8 @@ class AgentNetwork(nn.Module):
 
     def _prediction_vector(self, obs):
         y = self.fc_y(obs)
-        y = F.relu(y)
-        return F.threshold(y, threshold=1, value=1)
+        y = torch.sigmoid(y)
+        return torch.round(y)
 
     def forward(self, obs, act=None):
         pi = self._distribution(obs)
@@ -101,9 +101,13 @@ class MetaLearnerNetwork(nn.Module):
     def __init__(self, inp_dim, hidden_size, out_dim):
         super().__init__()
         self.net = nn.LSTM(input_size=inp_dim, hidden_size=hidden_size, bidirectional=True, batch_first=True)
-        self.fc = nn.Linear(hidden_size * 2, out_dim)
+        self.fc_y = nn.Linear(hidden_size * 2, out_dim)
+        self.fc_pi = nn.Linear(hidden_size * 2, 1)
 
     def forward(self, inp, h, c):
         out, (h, c) = self.net(inp, (h, c))
-        out = self.fc(out)
-        return out, h, c
+        y = self.fc_y(out)
+        y = torch.sigmoid(y)
+        y = torch.round(y)
+        pi = self.fc_pi(out)
+        return out, h, c, y, pi
