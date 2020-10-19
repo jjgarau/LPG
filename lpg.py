@@ -15,17 +15,19 @@ class DataBuffer:
         self.act_buf = np.zeros(combined_shape(size, act_dim), dtype=np.float32)
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.ret_buf = np.zeros(size, dtype=np.float32)
+        self.done_buf = np.zeros(size, dtype=np.float32)
         self.logp_buf = np.zeros(size, dtype=np.float32)
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
         self.gamma = gamma
 
-    def store(self, obs, act, rew, logp):
+    def store(self, obs, act, rew, logp, done):
 
         assert self.ptr < self.max_size
         self.obs_buf[self.ptr] = obs
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
         self.logp_buf[self.ptr] = logp
+        self.done_buf[self.ptr] = done
         self.ptr += 1
 
     def finish_path(self):
@@ -40,11 +42,11 @@ class DataBuffer:
         assert self.ptr == self.max_size
         self.ptr, self.path_start_idx = 0, 0
         data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
-                    logp=self.logp_buf)
+                    logp=self.logp_buf, rew=self.rew_buf, done=self.done_buf)
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
 
 
-def train_agent(env, lr, kl_cost, lifetime=1e6):
+def train_agent(env, meta_net, embed_net, lr, kl_cost, lifetime=1e6):
 
     # Get environment parameters
     obs_dim = env.observation_space.shape
@@ -61,11 +63,49 @@ def train_agent(env, lr, kl_cost, lifetime=1e6):
 
     # Update function
     def update():
-        pass
+        # Get data
+        data = buf.get()
+        obs, act, rew, done = data['obs'], data['act'], data['rew'], data['done']
+
+        # Roll the observation vector to get s_t+1
+        obs1 = torch.roll(obs, shifts=-1, dims=1)
+
+        for _ in range(args.train_pi_iters):
+            agent_optim.zero_grad()
+
+            # Obtain the y vector for s_t and s_t+1
+            pi, logp, y = agent.pi(obs, act)
+            _, _, y1 = agent.pi(obs1)
+
+            # Compute the embeddings for each y vector
+            fi_y = embed_net(y)
+            fi_y1 = embed_net(y1)
+
+            # Compute pi_hat and y_hat
+            # TODO: FIX THIS
+            inp = [rew, done, args.gamma, torch.exp(logp), fi_y, fi_y1]
+            h = None
+            c = None
+            pi_hat, y_hat = meta_net(inp, h, c)
+
+            # Compute agent loss
+            kl_term = torch.mul(y, torch.log(torch.div(y, y_hat)))
+            loss = logp * pi_hat - kl_cost * torch.sum(kl_term, dim=-1)
+            loss = loss.mean()
+
+            # Optimize
+            loss.backward()
+            agent_optim.step()
+
+            # TODO: RETURN METAGRADIENTS
+            return None
 
     # Prepare for interaction with environment
     start_time = time.time()
     o, ep_ret, ep_len = env.reset(), 0, 0
+
+    # Metagradients and returns
+    metagrads, returns = [], []
 
     # Main loop: collect experience in env
     for t in range(int(lifetime)):
@@ -79,7 +119,7 @@ def train_agent(env, lr, kl_cost, lifetime=1e6):
         ep_len += 1
 
         # Save in buffer
-        buf.store(o, a, r, logp)
+        buf.store(o, a, r, logp, d)
 
         # Update obs
         o = next_o
@@ -87,15 +127,17 @@ def train_agent(env, lr, kl_cost, lifetime=1e6):
         # Resetting the episode if current ended
         if d:
             buf.finish_path()
+            returns.append(ep_ret)
             o, ep_ret, ep_len = env.reset(), 0, 0
 
         if (t + 1) % args.trajectory_steps == 0:
-            update()
+            grad = update()
+            metagrads.append(grad)
+
+    return metagrads, returns
 
 
-def train_lpg(env_dist, init_agent_param_dist, num_parallel_lifetimes=1, seed=0):
-
-    env_dist_obs_dim = 16
+def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifetimes=1, seed=0):
 
     # Random seed
     torch.manual_seed(seed)
@@ -105,23 +147,44 @@ def train_lpg(env_dist, init_agent_param_dist, num_parallel_lifetimes=1, seed=0)
     parameter_bandit = ParameterBandit(env_dist)
 
     # Meta and Embedding networks
-    meta_net = MetaLearnerNetwork(inp_dim=env_dist_obs_dim, hidden_size=args.lstm_hidden_size, out_dim=2)
+    meta_net = MetaLearnerNetwork(inp_dim=6, hidden_size=args.lstm_hidden_size, out_dim=args.m)
     embed_net = EmbeddingNetwork(y_dim=args.m)
 
     # Set up optimizer for Meta and Embedding
     meta_optim = Adam(meta_net.parameters(), lr=args.meta_lr)
+    # TODO: UPDATE RULE FOR EMBED
     embed_optim = Adam(embed_net.parameters(), lr=0.001)
 
-    for lifetime in range(num_parallel_lifetimes):
+    for _ in range(num_meta_iterations):
 
-        env_name, (lr, kl_cost) = parameter_bandit.sample_combination()
-        env = env_dist.create(env_name)
+        # Initialize meta optim
+        meta_optim.zero_grad()
+
+        lifetimes_metagrads = []
+
+        for lifetime in range(num_lifetimes):
+
+            env_name, comb = parameter_bandit.sample_combination()
+            lr, kl_cost = comb
+            env = env_dist.create(env_name)
+            # TODO: LIFETIME VALUE
+            metagrads, returns = train_agent(env, meta_net, embed_net, lr, kl_cost)
+            lifetimes_metagrads.append(metagrads)
+
+            # Update bandit
+            parameter_bandit.update_bandits(env_name, comb, np.mean(returns))
+
+        # TODO: DO THIS CORRECTLY
+        loss = torch.sum(metagrads)
+        loss.backward()
+        meta_optim.step()
 
 
 def lpg():
     env_dist = None
     init_agent_param_dist = None
-    train_lpg(env_dist=env_dist, init_agent_param_dist=init_agent_param_dist)
+    train_lpg(env_dist=env_dist, init_agent_param_dist=init_agent_param_dist,
+              num_meta_iterations=args.num_meta_iterations)
 
 
 if __name__ == "__main__":
@@ -133,6 +196,7 @@ if __name__ == "__main__":
     parser.add_argument('--train_pi_iters', type=int, default=5)
     parser.add_argument('--trajectory_steps', type=int, default=20)
     parser.add_argument('--gamma', type=float, default=0.995)
+    parser.add_argument('--num_meta_iterations', type=int, default=5)
     args = parser.parse_args()
 
     lpg()
