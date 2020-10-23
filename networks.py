@@ -100,8 +100,10 @@ class MetaLearnerNetwork(nn.Module):
 
     def __init__(self, inp_dim, hidden_size, out_dim):
         super().__init__()
+        # TODO: CLARIFY IF THIS IS BIDIRECTIONAL LSTM OR EPISODE RUNNING BACKWARDS
         self.net = nn.LSTM(input_size=inp_dim, hidden_size=hidden_size, bidirectional=True, batch_first=True)
         self.fc_y = nn.Linear(hidden_size * 2, out_dim)
+        # TODO: WHAT IS HAT_PI EXACTLY?
         self.fc_pi = nn.Linear(hidden_size * 2, 1)
 
     def forward(self, inp, h, c):

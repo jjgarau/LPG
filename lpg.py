@@ -61,7 +61,7 @@ def train_agent(env, meta_net, embed_net, lr, kl_cost, lifetime=1e6):
     # Set up data buffer
     buf = DataBuffer(obs_dim=obs_dim, act_dim=act_dim, size=args.trajectory_steps, gamma=args.gamma)
 
-    # Update function
+    # Agent update function
     def update():
         # Get data
         data = buf.get()
@@ -146,13 +146,15 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
     # Create parameter bandit
     parameter_bandit = ParameterBandit(env_dist)
 
+    # TODO: CODE THE INITIAL PARAMETER DISTRIBUTION, distribution on theta
+
     # Meta and Embedding networks
     meta_net = MetaLearnerNetwork(inp_dim=6, hidden_size=args.lstm_hidden_size, out_dim=args.m)
     embed_net = EmbeddingNetwork(y_dim=args.m)
 
     # Set up optimizer for Meta and Embedding
     meta_optim = Adam(meta_net.parameters(), lr=args.meta_lr)
-    # TODO: UPDATE RULE FOR EMBED
+    # TODO: UPDATE RULE FOR EMBED, MAYBE INCLUDE IT IN THE META LEARNER
     embed_optim = Adam(embed_net.parameters(), lr=0.001)
 
     for _ in range(num_meta_iterations):

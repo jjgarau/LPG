@@ -4,7 +4,7 @@ import scipy
 
 class ParameterBandit:
 
-    def __init__(self, env_dist, temp=0.1, exp_bonus=0.2):
+    def __init__(self, env_dist, temp=0.1, exp_bonus=0.2, ret_size=10):
         self.environments = [env.name for env in env_dist]
         self.combinations = {env.name: [(lr, kl_cost) for lr in env.lrs for kl_cost in env.kl_costs]
                              for env in env_dist}
@@ -14,6 +14,7 @@ class ParameterBandit:
                        for (lr, kl_cost) in self.combinations[env_name]}
         self.temp = temp
         self.exp_bonus = exp_bonus
+        self.ret_size = ret_size
 
     def sample_combination(self):
         env_name = np.random.choice(self.environments)
@@ -33,7 +34,7 @@ class ParameterBandit:
 
     def update_bandits(self, env_name, env_comb, ret):
         comb = (env_name, *env_comb)
-        self.returns[comb] = [ret] + self.returns[comb][:9]
+        self.returns[comb] = [ret] + self.returns[comb][:(self.ret_size - 1)]
         self.trials[comb] += 1
 
 
