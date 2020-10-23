@@ -1,0 +1,13 @@
+numpy
+certifi==2020.6.20
+cloudpickle==1.6.0
+future==0.18.2
+gym==0.17.3
+mkl-fft==1.2.0
+mkl-random==1.1.1
+mkl-service==2.3.0
+numpy @ file:///tmp/build/80754af9/numpy_and_numpy_base_1596233721170/work
+pyglet==1.5.0
+scipy @ file:///tmp/build/80754af9/scipy_1597686649129/work
+six==1.15.0
+torch==1.6.0

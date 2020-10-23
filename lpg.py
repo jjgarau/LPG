@@ -3,7 +3,7 @@ import torch
 from torch.optim import Adam
 import argparse
 import time
-
+from environments import get_env_dist
 from networks import MetaLearnerNetwork, EmbeddingNetwork, Agent
 from utils import ParameterBandit, combined_shape, discount_cumsum
 
@@ -183,7 +183,7 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
 
 
 def lpg():
-    env_dist = None
+    env_dist = get_env_dist()
     init_agent_param_dist = None
     train_lpg(env_dist=env_dist, init_agent_param_dist=init_agent_param_dist,
               num_meta_iterations=args.num_meta_iterations)
