@@ -18,6 +18,7 @@ class ParameterBandit:
     def sample_combination(self):
         env_name = np.random.choice(self.environments)
         logits = []
+        # TODO: figure out how we want to handle the case where there are no trials yet; currently returns NaN for logits
         for (lr, kl_cost) in self.combinations[env_name]:
             comb = (env_name, lr, kl_cost)
             logit = (np.mean(self.returns[comb]) + self.exp_bonus / np.sqrt(self.trials[comb])) / self.temp
