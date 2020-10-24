@@ -6,12 +6,12 @@ import numpy as np
 
 # TODO: make one class that handles all cases
 class ShortDelayedChainMDP(Env):
+
     chain_length = 0
     name = "short"
 
-    # TODO: I don't know what these mean yet
-    lrs = [1]
-    kl_costs = [0]
+    lrs = [20.0, 40.0, 80.0]
+    kl_costs = [0.1, 0.5, 1.0]
 
     @classmethod
     def reset_parameters(cls):

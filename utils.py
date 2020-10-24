@@ -8,9 +8,9 @@ class ParameterBandit:
         self.environments = [env.name for env in env_dist]
         self.combinations = {env.name: [(lr, kl_cost) for lr in env.lrs for kl_cost in env.kl_costs]
                              for env in env_dist}
-        self.returns = {(env_name, lr, kl_cost): [] for env_name in self.environments
+        self.returns = {(env_name, lr, kl_cost): [0] for env_name in self.environments
                         for (lr, kl_cost) in self.combinations[env_name]}
-        self.trials = {(env_name, lr, kl_cost): 0 for env_name in self.environments
+        self.trials = {(env_name, lr, kl_cost): 1 for env_name in self.environments
                        for (lr, kl_cost) in self.combinations[env_name]}
         self.temp = temp
         self.exp_bonus = exp_bonus
@@ -19,7 +19,6 @@ class ParameterBandit:
     def sample_combination(self):
         env_name = np.random.choice(self.environments)
         logits = []
-        # TODO: figure out how we want to handle the case where there are no trials yet; currently returns NaN for logits
         for (lr, kl_cost) in self.combinations[env_name]:
             comb = (env_name, lr, kl_cost)
             logit = (np.mean(self.returns[comb]) + self.exp_bonus / np.sqrt(self.trials[comb])) / self.temp
