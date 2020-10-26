@@ -1,10 +1,11 @@
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.optim import Adam
 import argparse
 import time
 from environments import get_env_dist
-from networks import MetaLearnerNetwork, EmbeddingNetwork, Agent
+from networks import MetaLearnerNetwork, Agent
 from utils import ParameterBandit, combined_shape, discount_cumsum
 
 
@@ -30,10 +31,10 @@ class DataBuffer:
         self.done_buf[self.ptr] = done
         self.ptr += 1
 
-    def finish_path(self):
+    def finish_path(self, last_val=0):
 
         path_slice = slice(self.path_start_idx, self.ptr)
-        rews = self.rew_buf[path_slice]
+        rews = np.append(self.rew_buf[path_slice], last_val)
         self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma)[:-1]
         self.path_start_idx = self.ptr
 
@@ -46,14 +47,14 @@ class DataBuffer:
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
 
 
-def train_agent(env, meta_net, embed_net, lr, kl_cost, lifetime=1e6):
+def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
 
     # Get environment parameters
-    obs_dim = env.observation_space.shape
-    act_dim = env.action_space.shape
+    obs_dim = len(env.observation_space.shape) + 1
+    act_dim = len(env.action_space.shape) + 1
 
     # Agent network
-    agent = Agent(observation_space=env.observation_space, action_space=env.action_space, m=args.m)
+    agent = Agent(obs_dim=obs_dim, action_space=env.action_space, m=args.m)
 
     # Set up optimizer for agent
     agent_optim = Adam(agent.pi.parameters(), lr=lr)
@@ -68,37 +69,30 @@ def train_agent(env, meta_net, embed_net, lr, kl_cost, lifetime=1e6):
         obs, act, rew, done = data['obs'], data['act'], data['rew'], data['done']
 
         # Roll the observation vector to get s_t+1
-        obs1 = torch.roll(obs, shifts=-1, dims=1)
+        obs1 = torch.roll(obs, shifts=-1, dims=0)
 
         for _ in range(args.train_pi_iters):
             agent_optim.zero_grad()
 
             # Obtain the y vector for s_t and s_t+1
-            pi, logp, y = agent.pi(obs, act)
+            pi, logp, y = agent.pi(obs, act.squeeze())
             _, _, y1 = agent.pi(obs1)
 
-            # Compute the embeddings for each y vector
-            fi_y = embed_net(y)
-            fi_y1 = embed_net(y1)
-
             # Compute pi_hat and y_hat
-            # TODO: FIX THIS
-            inp = [rew, done, args.gamma, torch.exp(logp), fi_y, fi_y1]
-            h = None
-            c = None
-            pi_hat, y_hat = meta_net(inp, h, c)
+            inp = (rew, done, args.gamma, torch.exp(logp), y, y1)
+            pi_hat, y_hat = meta_net(inp)
 
             # Compute agent loss
-            kl_term = torch.mul(y, torch.log(torch.div(y, y_hat)))
-            loss = logp * pi_hat - kl_cost * torch.sum(kl_term, dim=-1)
+            # TODO: ARE WE SURE Y IS BINARY?
+            kl_term = torch.sum(F.kl_div(y, y_hat, reduction='none'), dim=-1)
+            loss = logp * pi_hat - kl_cost * kl_term
             loss = loss.mean()
 
             # Optimize
-            loss.backward()
+            loss.backward(retain_graph=True)
             agent_optim.step()
 
-            # TODO: RETURN METAGRADIENTS
-            return None
+        return loss
 
     # Prepare for interaction with environment
     start_time = time.time()
@@ -130,6 +124,9 @@ def train_agent(env, meta_net, embed_net, lr, kl_cost, lifetime=1e6):
             returns.append(ep_ret)
             o, ep_ret, ep_len = env.reset(), 0, 0
 
+        if (t + 1) % 100 == 0:
+            print(t + 1)
+
         if (t + 1) % args.trajectory_steps == 0:
             grad = update()
             metagrads.append(grad)
@@ -145,17 +142,15 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
 
     # Create parameter bandit
     parameter_bandit = ParameterBandit(env_dist)
+    env_dict = {env.name: env for env in env_dist}
 
     # TODO: CODE THE INITIAL PARAMETER DISTRIBUTION, distribution on theta
 
     # Meta and Embedding networks
-    meta_net = MetaLearnerNetwork(inp_dim=6, hidden_size=args.lstm_hidden_size, out_dim=args.m)
-    embed_net = EmbeddingNetwork(y_dim=args.m)
+    meta_net = MetaLearnerNetwork(inp_dim=6, hidden_size=args.lstm_hidden_size, y_dim=args.m)
 
-    # Set up optimizer for Meta and Embedding
+    # Set up optimizer for Metanetwork
     meta_optim = Adam(meta_net.parameters(), lr=args.meta_lr)
-    # TODO: UPDATE RULE FOR EMBED, MAYBE INCLUDE IT IN THE META LEARNER
-    embed_optim = Adam(embed_net.parameters(), lr=0.001)
 
     for _ in range(num_meta_iterations):
 
@@ -168,16 +163,16 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
 
             env_name, comb = parameter_bandit.sample_combination()
             lr, kl_cost = comb
-            env = env_dist.create(env_name)
+            env = env_dict[env_name]()
             # TODO: LIFETIME VALUE
-            metagrads, returns = train_agent(env, meta_net, embed_net, lr, kl_cost)
+            metagrads, returns = train_agent(env, meta_net, lr, kl_cost)
             lifetimes_metagrads.append(metagrads)
 
             # Update bandit
             parameter_bandit.update_bandits(env_name, comb, np.mean(returns))
 
-        # TODO: DO THIS CORRECTLY
-        loss = torch.sum(metagrads)
+        # TODO: FULL LOSS FUNCTION
+        loss = sum(m for m in metagrads) / len(metagrads)
         loss.backward()
         meta_optim.step()
 

@@ -1,5 +1,5 @@
 import numpy as np
-import scipy
+from scipy.signal import lfilter
 
 
 class ParameterBandit:
@@ -59,4 +59,4 @@ def discount_cumsum(x, discount):
          x1 + discount * x2,
          x2]
     """
-    return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
+    return lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
