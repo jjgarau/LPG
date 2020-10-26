@@ -74,9 +74,14 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
         for _ in range(args.train_pi_iters):
             agent_optim.zero_grad()
 
+            # Obtain logp vector for s_t
+            _, logp = agent.pi(obs, act.squeeze())
+
             # Obtain the y vector for s_t and s_t+1
-            pi, logp, y = agent.pi(obs, act.squeeze())
-            _, _, y1 = agent.pi(obs1)
+            merge_obs = torch.cat((obs, obs1), dim=-1).unsqueeze(dim=-1)
+            merge_y = agent.pi.prediction_vector(merge_obs)
+            y = merge_y[:, 0, :].squeeze()
+            y1 = merge_y[:, 1, :].squeeze()
 
             # Compute pi_hat and y_hat
             inp = (rew, done, args.gamma, torch.exp(logp), y, y1)
@@ -185,6 +190,7 @@ def lpg():
 
 
 if __name__ == "__main__":
+    torch.autograd.set_detect_anomaly(True)
 
     parser = argparse.ArgumentParser(description="Main script for running LPG")
     parser.add_argument('--lstm_hidden_size', type=int, default=256)

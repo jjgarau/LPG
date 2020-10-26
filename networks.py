@@ -20,7 +20,7 @@ class AgentNetwork(nn.Module):
     def _log_prob_from_distribution(self, pi, act):
         raise NotImplementedError
 
-    def _prediction_vector(self, obs):
+    def prediction_vector(self, obs):
         y = self.fc_y(obs)
         y = torch.sigmoid(y)
         return torch.round(y) if self.round_y else y
@@ -28,8 +28,7 @@ class AgentNetwork(nn.Module):
     def forward(self, obs, act=None):
         pi = self._distribution(obs)
         logp_a = self._log_prob_from_distribution(pi, act) if act is not None else None
-        y = self._prediction_vector(obs)
-        return pi, logp_a, y
+        return pi, logp_a
 
 
 class CategoricalAgentNetwork(AgentNetwork):
