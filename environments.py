@@ -13,21 +13,24 @@ class ShortDelayedChainMDP(Env):
     lrs = [20.0, 40.0, 80.0]
     kl_costs = [0.1, 0.5, 1.0]
 
-    @classmethod
-    def reset_parameters(cls):
-        cls.delayed_chain_length = random.randint(5, 30)
+    # @classmethod
+    # def reset_parameters(cls):
+    #     cls.delayed_chain_length = random.randint(5, 30)
 
     def __init__(self):
         self.counter = 0  # the episode ends after delayed_chain_length steps
         self.initial_action = 0
         self.initial_target_state = random.randint(0, 1)  # the first decision determines the reward
+        self.chain_length = random.randint(5, 30)
         self.action_space = Discrete(2)
         self.observation_space = Discrete(self.chain_length)
 
     def _get_observation(self):
         obs = np.zeros(shape=1, dtype=np.float32)
-        obs[
-            0] = 2 * self.counter + self.initial_action  # states on the first chain are even numbered, others are odd-numbered
+        if self.counter == 0:
+            obs[0] = 0
+        else:
+            obs[0] = 2 * self.counter - self.initial_action  # states on the first chain are even numbered, others are odd-numbered
         return obs
 
     def step(self, action):
