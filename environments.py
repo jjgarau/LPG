@@ -4,30 +4,26 @@ from gym.spaces import Discrete
 import numpy as np
 import abc
 
-# TODO: make one class that handles all cases
+
 class DelayedChainMDP(Env):
+
     @property
-    @abc.abstractproperty
     def name(self):
         raise NotImplementedError
 
     @property
-    @abc.abstractproperty
     def lowerbound(self):
         raise NotImplementedError
 
     @property
-    @abc.abstractproperty
     def upperbound(self):
         raise NotImplementedError
 
     @property
-    @abc.abstractproperty
     def lrs(self):
         raise NotImplementedError
 
     @property
-    @abc.abstractproperty
     def kl_costs(self):
         raise NotImplementedError
 
@@ -103,6 +99,7 @@ class DelayedChainMDP(Env):
 
 
 class ShortDelayedChainMDP(DelayedChainMDP):
+
     name = "short"
     lowerbound = 5
     upperbound = 50
@@ -110,12 +107,15 @@ class ShortDelayedChainMDP(DelayedChainMDP):
     kl_costs = [0.1, 0.5, 1]
 
 class ShortNoisyDelayedChainMDP(ShortDelayedChainMDP):
+
     name = "short-noisy"
+
     def noisy_reward(self):
         return random.uniform(-1, 1)
 
 
 class LongDelayedChainMDP(DelayedChainMDP):
+
     name = "long"
     lowerbound = 5
     upperbound = 50
@@ -123,9 +123,12 @@ class LongDelayedChainMDP(DelayedChainMDP):
     kl_costs = [0.1, 0.5, 1]
 
 class LongNoisyDelayedChainMDP(LongDelayedChainMDP):
+
     name = "long-noisy"
+
     def noisy_reward(self):
         return random.uniform(-1, 1)
+
 
 ENVIRONMENTS = [ShortDelayedChainMDP, LongDelayedChainMDP, ShortNoisyDelayedChainMDP, LongNoisyDelayedChainMDP]
 

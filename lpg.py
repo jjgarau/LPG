@@ -85,7 +85,7 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
 
             # Compute pi_hat and y_hat
             inp = (rew, done, args.gamma, torch.exp(logp), y, y1)
-            pi_hat, y_hat = meta_net(inp)
+            pi_hat, y_hat = meta_net.get_estimations(inp)
 
             # Compute agent loss
             kl_term = torch.sum(F.kl_div(y, y_hat, reduction='none'), dim=-1)
@@ -178,8 +178,9 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
             parameter_bandit.update_bandits(env_name, comb, np.mean(returns))
 
         # TODO: FULL LOSS FUNCTION
-        loss = torch.add(metagrads[0], metagrads[1])
+        # loss = torch.add(metagrads[0], metagrads[1])
         # loss = sum(m for m in metagrads) / len(metagrads)
+        loss = metagrads[0]
         loss.backward()
         meta_optim.step()
 

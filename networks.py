@@ -122,6 +122,11 @@ class MetaLearnerNetwork(nn.Module):
         y = self.embed_fc2(y)
         return torch.sigmoid(y)
 
+    def get_estimations(self, inp, h=None, c=None):
+        with torch.no_grad():
+            pi, y = self.forward(inp, h, c)
+        return pi, y
+
     def forward(self, inp, h=None, c=None):
 
         # Get input
