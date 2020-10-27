@@ -2,26 +2,43 @@ from gym import Env
 import random
 from gym.spaces import Discrete
 import numpy as np
-
+import abc
 
 # TODO: make one class that handles all cases
-class ShortDelayedChainMDP(Env):
+class DelayedChainMDP(Env):
+    @property
+    @abc.abstractproperty
+    def name(self):
+        raise NotImplementedError
 
-    chain_length = 0
-    name = "short"
+    @property
+    @abc.abstractproperty
+    def lowerbound(self):
+        raise NotImplementedError
 
-    lrs = [20.0, 40.0, 80.0]
-    kl_costs = [0.1, 0.5, 1.0]
+    @property
+    @abc.abstractproperty
+    def upperbound(self):
+        raise NotImplementedError
 
-    # @classmethod
-    # def reset_parameters(cls):
-    #     cls.delayed_chain_length = random.randint(5, 30)
+    @property
+    @abc.abstractproperty
+    def lrs(self):
+        raise NotImplementedError
+
+    @property
+    @abc.abstractproperty
+    def kl_costs(self):
+        raise NotImplementedError
+
+    def noisy_reward(self):
+        return 0
 
     def __init__(self):
         self.counter = 0  # the episode ends after delayed_chain_length steps
         self.initial_action = 0
         self.initial_target_state = random.randint(0, 1)  # the first decision determines the reward
-        self.chain_length = random.randint(5, 30)
+        self.chain_length = random.randint(self.lowerbound, self.upperbound)
         self.action_space = Discrete(2)
         self.observation_space = Discrete(self.chain_length)
 
@@ -58,6 +75,9 @@ class ShortDelayedChainMDP(Env):
             done = True
             reward = 1 if self.initial_action == self.initial_target_state else -1
 
+        if reward == 0:
+            reward += self.noisy_reward()
+
         obs = self._get_observation()
 
         return obs, reward, done, None
@@ -82,7 +102,32 @@ class ShortDelayedChainMDP(Env):
         return self._get_observation()
 
 
-ENVIRONMENTS = [ShortDelayedChainMDP]
+class ShortDelayedChainMDP(DelayedChainMDP):
+    name = "short"
+    lowerbound = 5
+    upperbound = 50
+    lrs = [20, 40, 80]
+    kl_costs = [0.1, 0.5, 1]
+
+class ShortNoisyDelayedChainMDP(ShortDelayedChainMDP):
+    name = "short-noisy"
+    def noisy_reward(self):
+        return random.uniform(-1, 1)
+
+
+class LongDelayedChainMDP(DelayedChainMDP):
+    name = "long"
+    lowerbound = 5
+    upperbound = 50
+    lrs = [20, 40, 80]
+    kl_costs = [0.1, 0.5, 1]
+
+class LongNoisyDelayedChainMDP(LongDelayedChainMDP):
+    name = "long-noisy"
+    def noisy_reward(self):
+        return random.uniform(-1, 1)
+
+ENVIRONMENTS = [ShortDelayedChainMDP, LongDelayedChainMDP, ShortNoisyDelayedChainMDP, LongNoisyDelayedChainMDP]
 
 
 def get_env_dist():
