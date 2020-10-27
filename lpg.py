@@ -88,7 +88,6 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
             pi_hat, y_hat = meta_net(inp)
 
             # Compute agent loss
-            # TODO: ARE WE SURE Y IS BINARY?
             kl_term = torch.sum(F.kl_div(y, y_hat, reduction='none'), dim=-1)
             loss = logp * pi_hat - kl_cost * kl_term
             loss = loss.mean()
@@ -129,9 +128,11 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
             returns.append(ep_ret)
             o, ep_ret, ep_len = env.reset(), 0, 0
 
+        # Print iteration number
         if (t + 1) % 100 == 0:
             print(t + 1)
 
+        # Call update function after K steps
         if (t + 1) % args.trajectory_steps == 0:
             grad = update()
             metagrads.append(grad)
@@ -177,7 +178,8 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
             parameter_bandit.update_bandits(env_name, comb, np.mean(returns))
 
         # TODO: FULL LOSS FUNCTION
-        loss = sum(m for m in metagrads) / len(metagrads)
+        loss = torch.add(metagrads[0], metagrads[1])
+        # loss = sum(m for m in metagrads) / len(metagrads)
         loss.backward()
         meta_optim.step()
 
@@ -186,20 +188,22 @@ def lpg():
     env_dist = get_env_dist()
     init_agent_param_dist = None
     train_lpg(env_dist=env_dist, init_agent_param_dist=init_agent_param_dist,
-              num_meta_iterations=args.num_meta_iterations)
+              num_meta_iterations=args.num_meta_iterations, num_lifetimes=args.num_lifetimes)
 
 
 if __name__ == "__main__":
     torch.autograd.set_detect_anomaly(True)
 
     parser = argparse.ArgumentParser(description="Main script for running LPG")
-    parser.add_argument('--lstm_hidden_size', type=int, default=256)
-    parser.add_argument('--m', type=int, default=30)
-    parser.add_argument('--meta_lr', type=float, default=0.0001)
-    parser.add_argument('--train_pi_iters', type=int, default=5)
-    parser.add_argument('--trajectory_steps', type=int, default=20)
-    parser.add_argument('--gamma', type=float, default=0.995)
-    parser.add_argument('--num_meta_iterations', type=int, default=5)
+    parser.add_argument('--lstm_hidden_size', type=int, default=256, help="Hidden size of the LSTM meta network")
+    parser.add_argument('--m', type=int, default=30, help="Dimension of y vector")
+    parser.add_argument('--meta_lr', type=float, default=0.0001, help="Learning rate for the meta network")
+    parser.add_argument('--train_pi_iters', type=int, default=5,
+                        help="K, number of consecutive training iterations for the agent")
+    parser.add_argument('--trajectory_steps', type=int, default=20, help="Number of steps between agent iterations")
+    parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
+    parser.add_argument('--num_meta_iterations', type=int, default=5, help="Number of meta updates")
+    parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
     args = parser.parse_args()
 
     lpg()

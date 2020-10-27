@@ -17,7 +17,11 @@ class ParameterBandit:
         self.ret_size = ret_size
 
     def sample_combination(self):
+
+        # Sample which environment
         env_name = np.random.choice(self.environments)
+
+        # Compute probabilities for that environment
         logits = []
         for (lr, kl_cost) in self.combinations[env_name]:
             comb = (env_name, lr, kl_cost)
@@ -25,6 +29,8 @@ class ParameterBandit:
             logits.append(logit)
         logits = np.exp(logits)
         logits = logits / np.sum(logits)
+
+        # Sample one combination of learning rate and KL cost based on computed probabilities
         index = np.random.choice(len(self.combinations[env_name]), p=logits)
         return env_name, self.combinations[env_name][index]
 
@@ -45,18 +51,4 @@ def combined_shape(length, shape=None):
 
 
 def discount_cumsum(x, discount):
-    """
-    magic from rllab for computing discounted cumulative sums of vectors.
-
-    input:
-        vector x,
-        [x0,
-         x1,
-         x2]
-
-    output:
-        [x0 + discount * x1 + discount^2 * x2,
-         x1 + discount * x2,
-         x2]
-    """
     return lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]

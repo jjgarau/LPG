@@ -11,6 +11,7 @@ class AgentNetwork(nn.Module):
 
     def __init__(self, obs_dim, m, round_y):
         super().__init__()
+        # Neural network to compute y vector
         self.fc_y = nn.Linear(obs_dim, m)
         self.round_y = round_y
 
@@ -21,13 +22,24 @@ class AgentNetwork(nn.Module):
         raise NotImplementedError
 
     def prediction_vector(self, obs):
+
+        # Network pass
         y = self.fc_y(obs)
+
+        # Sigmoid to bound between [0, 1]
         y = torch.sigmoid(y)
+
+        # Round y if predefined
         return torch.round(y) if self.round_y else y
 
     def forward(self, obs, act=None):
+
+        # Get probability distribution over actions
         pi = self._distribution(obs)
+
+        # Compute logp for provided actions
         logp_a = self._log_prob_from_distribution(pi, act) if act is not None else None
+
         return pi, logp_a
 
 
@@ -67,16 +79,23 @@ class Agent(nn.Module):
     def __init__(self, obs_dim, action_space, m):
         super().__init__()
 
+        # Continuous action spaces
         if isinstance(action_space, Box):
             self.pi = GaussianAgentNetwork(obs_dim, action_space.shape[0], m)
+
+        # Discrete action spaces
         elif isinstance(action_space, Discrete):
             self.pi = CategoricalAgentNetwork(obs_dim, action_space.n, m)
 
     def step(self, obs):
         with torch.no_grad():
+            # Get probability distribution and sample action
             pi = self.pi._distribution(obs)
             a = pi.sample()
+
+            # Compute logp of action
             logp_a = self.pi._log_prob_from_distribution(pi, a)
+
         return a.numpy(), logp_a.numpy()
 
 
@@ -87,10 +106,13 @@ class MetaLearnerNetwork(nn.Module):
         self.hidden_size = hidden_size
         self.round_y = round_y
         # TODO: CLARIFY IF THIS IS BIDIRECTIONAL LSTM OR EPISODE RUNNING BACKWARDS
+
+        # Meta network
         self.net = nn.LSTM(input_size=inp_dim, hidden_size=hidden_size, bidirectional=True, batch_first=True)
         self.fc_y = nn.Linear(hidden_size * 2, y_dim)
-        # TODO: WHAT IS HAT_PI EXACTLY?
         self.fc_pi = nn.Linear(hidden_size * 2, 1)
+
+        # Embedding network
         self.embed_fc1 = nn.Linear(y_dim, 16)
         self.embed_fc2 = nn.Linear(16, 1)
 
@@ -122,8 +144,15 @@ class MetaLearnerNetwork(nn.Module):
         h = torch.zeros((2, batch_size, self.hidden_size)) if h is None else h
         c = torch.zeros((2, batch_size, self.hidden_size)) if c is None else c
 
+        # Done mask
+        mask = torch.roll(done, shifts=1, dims=0)
+        mask = mask.repeat((2, 1, self.hidden_size))
+        mask = torch.ones_like(mask) - mask
+        h = torch.mul(h, mask)
+        c = torch.mul(c, mask)
+
         # LSTM pass
-        # TODO: WHAT DO WE DO WITH H AND C?
+        # TODO: WHAT DO WE DO WITH H AND C? RESET AFTER EACH EPISODE
         out, (h, c) = self.net(input, (h, c))
 
         # Computing y_hat and pi_hat
