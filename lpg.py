@@ -48,7 +48,7 @@ class DataBuffer:
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
 
 
-def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
+def train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, beta1=0.001, beta2=0.001, beta3=0.001):
 
     # Get environment parameters
     obs_dim = len(env.observation_space.shape) + 1
@@ -61,7 +61,7 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
     buf = DataBuffer(obs_dim=obs_dim, act_dim=act_dim, size=args.trajectory_steps, gamma=args.gamma)
 
     # Agent update function
-    def update_agent():
+    def update_agent(eps=1e-7):
         # Get data
         data = buf.get()
         obs, act, rew, done, ret = data['obs'], data['act'], data['rew'], data['done'], data['ret']
@@ -74,7 +74,10 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
         for _ in range(args.train_pi_iters):
 
             # Obtain logp vector for s_t
-            _, logp = agent.pi(obs, act.squeeze())
+            pi, logp = agent.pi(obs, act.squeeze())
+
+            # Compute pi entropy
+            ent_pi = pi.entropy()
 
             # Obtain the y vector for s_t and s_t+1
             merge_obs = torch.cat((obs, obs1), dim=-1).unsqueeze(dim=-1)
@@ -82,9 +85,17 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
             y = merge_y[:, 0, :].squeeze()
             y1 = merge_y[:, 1, :].squeeze()
 
+            # Compute y entropy
+            ent_y = - y * torch.log2(y + eps) - (1 - y) * torch.log2(1 - y + eps)
+            ent_y = torch.sum(ent_y, dim=-1)
+
             # Compute pi_hat and y_hat
             inp = (rew, done, args.gamma, torch.exp(logp), y, y1)
             pi_hat, y_hat = meta_net.get_estimations(inp)
+
+            # Compute L2 norms
+            l2_pi = torch.pow(pi_hat, 2)
+            l2_y = torch.sum(torch.pow(y_hat, 2), dim=-1)
 
             # Compute agent loss
             kl_term = torch.sum(F.kl_div(y, y_hat, reduction='none'), dim=-1)
@@ -98,11 +109,11 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
                 # Gradient ascent
                 state_dict[name] = state_dict[name] + lr * g[i]
 
-            # TODO: FULL METALOSS FUNCTION
-            logp_ret = logp * ret
-            meta_loss = meta_loss + logp_ret.mean()
+            # Compute meta_loss and update
+            meta_loss_update = logp * ret + beta0 * ent_pi + beta1 * ent_y - beta2 * l2_pi - beta3 * l2_y
+            meta_loss = meta_loss + meta_loss_update
 
-        return meta_loss
+        return meta_loss.mean()
 
     # Prepare for interaction with environment
     o, ep_ret, ep_len = env.reset(), 0, 0
@@ -113,7 +124,7 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
     meta_counter = 0
 
     # Main loop: collect experience in env
-    for t in range(int(lifetime)):
+    for t in range(int(lifetime_timesteps)):
 
         # Agent take action
         a, logp = agent.step(torch.as_tensor(o, dtype=torch.float32))
@@ -145,7 +156,7 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
             meta_losses = meta_losses + meta_loss
             meta_counter += 1
 
-    return meta_losses / meta_counter, returns
+    return meta_losses / meta_counter, np.mean(returns)
 
 
 def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifetimes=1, seed=0):
@@ -166,6 +177,9 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
     # Set up optimizer for Metanetwork
     meta_optim = Adam(meta_net.parameters(), lr=args.meta_lr)
 
+    # Tracking returns
+    all_returns = []
+
     for _ in range(num_meta_iterations):
 
         # Initialize meta optim
@@ -175,15 +189,23 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
 
         for lifetime in range(num_lifetimes):
 
+            # Sample an environment, a learning rate, and a kl cost value
             env_name, comb = parameter_bandit.sample_combination()
             lr, kl_cost = comb
+
+            # Create the environment
             env = env_dict[env_name]()
-            meta_losses, returns = train_agent(env, meta_net, lr, kl_cost)
+
+            # Train the agent and receive the metagradients
+            meta_losses, returns = train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=args.lifetime_timesteps,
+                                               beta0=args.beta0, beta1=args.beta1, beta2=args.beta2, beta3=args.beta3)
             lifetimes_meta_losses.append(meta_losses)
+            all_returns.append(returns)
 
             # Update bandit
             parameter_bandit.update_bandits(env_name, comb, np.mean(returns))
 
+        # Gradient ascent
         loss = -1 * sum(lifetimes_meta_losses) / len(lifetimes_meta_losses)
         loss.backward()
         meta_optim.step()
@@ -209,6 +231,11 @@ if __name__ == "__main__":
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
     parser.add_argument('--num_meta_iterations', type=int, default=5, help="Number of meta updates")
     parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
+    parser.add_argument('--lifetime_timesteps', type=int, default=1e3, help="Number of timesteps per lifetime")
+    parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
+    parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
+    parser.add_argument('--beta2', type=float, default=0.001, help="L2 regularization weight for pi hat, beta 2")
+    parser.add_argument('--beta3', type=float, default=0.001, help="L2 regularization wright for y hat, beta 3")
     args = parser.parse_args()
 
     lpg()
