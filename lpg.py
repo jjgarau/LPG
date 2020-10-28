@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.optim import Adam
+from torch.autograd import Variable
 import argparse
 import time
 from environments import get_env_dist
@@ -56,23 +57,21 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
     # Agent network
     agent = Agent(obs_dim=obs_dim, action_space=env.action_space, m=args.m)
 
-    # Set up optimizer for agent
-    agent_optim = Adam(agent.pi.parameters(), lr=lr)
-
     # Set up data buffer
     buf = DataBuffer(obs_dim=obs_dim, act_dim=act_dim, size=args.trajectory_steps, gamma=args.gamma)
 
     # Agent update function
-    def update():
+    def update_agent():
         # Get data
         data = buf.get()
-        obs, act, rew, done = data['obs'], data['act'], data['rew'], data['done']
+        obs, act, rew, done, ret = data['obs'], data['act'], data['rew'], data['done'], data['ret']
 
         # Roll the observation vector to get s_t+1
         obs1 = torch.roll(obs, shifts=-1, dims=0)
 
+        meta_loss = 0
+
         for _ in range(args.train_pi_iters):
-            agent_optim.zero_grad()
 
             # Obtain logp vector for s_t
             _, logp = agent.pi(obs, act.squeeze())
@@ -93,17 +92,25 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
             loss = loss.mean()
 
             # Optimize
-            loss.backward(retain_graph=True)
-            agent_optim.step()
+            g = torch.autograd.grad(loss, agent.pi.parameters(), retain_graph=True)
+            state_dict = agent.state_dict()
+            for i, (name, param) in enumerate(state_dict.items()):
+                # Gradient ascent
+                state_dict[name] = state_dict[name] + lr * g[i]
 
-        return loss
+            # TODO: FULL METALOSS FUNCTION
+            logp_ret = logp * ret
+            meta_loss = meta_loss + logp_ret.mean()
+
+        return meta_loss
 
     # Prepare for interaction with environment
-    start_time = time.time()
     o, ep_ret, ep_len = env.reset(), 0, 0
 
     # Metagradients and returns
-    metagrads, returns = [], []
+    returns = []
+    meta_losses = 0
+    meta_counter = 0
 
     # Main loop: collect experience in env
     for t in range(int(lifetime)):
@@ -134,10 +141,11 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime=1e3):
 
         # Call update function after K steps
         if (t + 1) % args.trajectory_steps == 0:
-            grad = update()
-            metagrads.append(grad)
+            meta_loss = update_agent()
+            meta_losses = meta_losses + meta_loss
+            meta_counter += 1
 
-    return metagrads, returns
+    return meta_losses / meta_counter, returns
 
 
 def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifetimes=1, seed=0):
@@ -163,24 +171,20 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
         # Initialize meta optim
         meta_optim.zero_grad()
 
-        lifetimes_metagrads = []
+        lifetimes_meta_losses = []
 
         for lifetime in range(num_lifetimes):
 
             env_name, comb = parameter_bandit.sample_combination()
             lr, kl_cost = comb
             env = env_dict[env_name]()
-            # TODO: LIFETIME VALUE
-            metagrads, returns = train_agent(env, meta_net, lr, kl_cost)
-            lifetimes_metagrads.append(metagrads)
+            meta_losses, returns = train_agent(env, meta_net, lr, kl_cost)
+            lifetimes_meta_losses.append(meta_losses)
 
             # Update bandit
             parameter_bandit.update_bandits(env_name, comb, np.mean(returns))
 
-        # TODO: FULL LOSS FUNCTION
-        # loss = torch.add(metagrads[0], metagrads[1])
-        # loss = sum(m for m in metagrads) / len(metagrads)
-        loss = metagrads[0]
+        loss = -1 * sum(lifetimes_meta_losses) / len(lifetimes_meta_losses)
         loss.backward()
         meta_optim.step()
 

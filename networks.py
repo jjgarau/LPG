@@ -143,6 +143,7 @@ class MetaLearnerNetwork(nn.Module):
         done = done.unsqueeze(dim=-1)
         prob = prob.unsqueeze(dim=-1)
         input = torch.cat((rew, done, gamma, prob, fi_y, fi_y1), dim=-1)
+        # TODO: SEQUENCE DIM
         input = input.unsqueeze(dim=1)
 
         # Initialize h and c vectors
