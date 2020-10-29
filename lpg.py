@@ -2,12 +2,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.optim import Adam
-from torch.autograd import Variable
 import argparse
-import time
 from environments import get_env_dist
 from networks import MetaLearnerNetwork, Agent
 from utils import ParameterBandit, combined_shape, discount_cumsum
+import matplotlib.pyplot as plt
 
 
 class DataBuffer:
@@ -64,9 +63,11 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, 
     def update_agent(eps=1e-7):
         # Get data
         data = buf.get()
+        # TODO: HOW TO DEFINE RETURN VECTOR
         obs, act, rew, done, ret = data['obs'], data['act'], data['rew'], data['done'], data['ret']
 
         # Roll the observation vector to get s_t+1
+        # TODO: I JUST DO A ROLL, IS IT OK?
         obs1 = torch.roll(obs, shifts=-1, dims=0)
 
         meta_loss = 0
@@ -109,9 +110,10 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, 
                 # Gradient ascent
                 state_dict[name] = state_dict[name] + lr * g[i]
 
-            # Compute meta_loss and update
-            meta_loss_update = logp * ret + beta0 * ent_pi + beta1 * ent_y - beta2 * l2_pi - beta3 * l2_y
-            meta_loss = meta_loss + meta_loss_update
+        # Compute meta_loss and update
+        # TODO: AM I DOING THIS CORRECTLY?
+        meta_loss_update = logp * ret + beta0 * ent_pi + beta1 * ent_y - beta2 * l2_pi - beta3 * l2_y
+        meta_loss = meta_loss + meta_loss_update
 
         return meta_loss.mean()
 
@@ -147,7 +149,7 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, 
             o, ep_ret, ep_len = env.reset(), 0, 0
 
         # Print iteration number
-        if (t + 1) % 100 == 0:
+        if (t + 1) % 10000 == 0:
             print(t + 1)
 
         # Call update function after K steps
@@ -180,7 +182,9 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
     # Tracking returns
     all_returns = []
 
-    for _ in range(num_meta_iterations):
+    for it in range(num_meta_iterations):
+
+        print("Meta iteration", it + 1)
 
         # Initialize meta optim
         meta_optim.zero_grad()
@@ -188,6 +192,8 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
         lifetimes_meta_losses = []
 
         for lifetime in range(num_lifetimes):
+
+            print("Starting lifetime", lifetime + 1)
 
             # Sample an environment, a learning rate, and a kl cost value
             env_name, comb = parameter_bandit.sample_combination()
@@ -210,6 +216,9 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
         loss.backward()
         meta_optim.step()
 
+    plt.plot(all_returns)
+    plt.show()
+
 
 def lpg():
     env_dist = get_env_dist()
@@ -229,9 +238,9 @@ if __name__ == "__main__":
                         help="K, number of consecutive training iterations for the agent")
     parser.add_argument('--trajectory_steps', type=int, default=20, help="Number of steps between agent iterations")
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
-    parser.add_argument('--num_meta_iterations', type=int, default=5, help="Number of meta updates")
+    parser.add_argument('--num_meta_iterations', type=int, default=100, help="Number of meta updates")
     parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=1e3, help="Number of timesteps per lifetime")
+    parser.add_argument('--lifetime_timesteps', type=int, default=2e4, help="Number of timesteps per lifetime")
     parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
     parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
     parser.add_argument('--beta2', type=float, default=0.001, help="L2 regularization weight for pi hat, beta 2")
