@@ -147,18 +147,18 @@ class MetaLearnerNetwork(nn.Module):
         input = torch.cat((rew, done, gamma, prob, fi_y, fi_y1), dim=-1)
 
         # Initialize h vectors
-        h = torch.zeros((1, batch_size, self.hidden_size))
+        h = torch.zeros((1, batch_size, self.hidden_size)).to(device)
 
         # We process the input backwards
         input = torch.flip(input, dims=[1])
 
         # We initialize the output
-        output = torch.zeros((batch_size, rollout_size, self.hidden_size))
+        output = torch.zeros((batch_size, rollout_size, self.hidden_size)).to(device)
 
         # GRU pass
         for i in range(rollout_size):
             done_filter = 1 - input[:, i:(i+1), 1]
-            done_filter = done_filter.unsqueeze(dim=0).repeat((1, 1, self.hidden_size)).to(device)
+            done_filter = done_filter.unsqueeze(dim=0).repeat((1, 1, self.hidden_size))
             h = h * done_filter
             inp = input[:, i:(i + 1), :]
             out, h = self.net(inp, h)
