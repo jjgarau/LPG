@@ -55,6 +55,7 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
 
     # Agent network
     agent = Agent(obs_dim=obs_dim, action_space=env_list[0].action_space, m=args.m)
+    agent.to(device)
 
     # Set correct number of trajectory steps
     trajectory_steps = args.trajectory_steps + 1
@@ -75,12 +76,12 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
             done.append(data['done'].unsqueeze(dim=-1))
             ret.append(data['ret'].unsqueeze(dim=-1))
 
-        obs = torch.transpose(torch.cat(obs, dim=-1), 0, 1)
+        obs = torch.transpose(torch.cat(obs, dim=-1), 0, 1).to(device)
         obs1 = obs[:, 1:]
-        act = torch.transpose(torch.cat(act, dim=-1), 0, 1)[:, :-1]
-        rew = torch.transpose(torch.cat(rew, dim=-1), 0, 1)[:, :-1]
-        done = torch.transpose(torch.cat(done, dim=-1), 0, 1)[:, :-1]
-        ret = torch.transpose(torch.cat(ret, dim=-1), 0, 1)[:, :-1]
+        act = torch.transpose(torch.cat(act, dim=-1), 0, 1)[:, :-1].to(device)
+        rew = torch.transpose(torch.cat(rew, dim=-1), 0, 1)[:, :-1].to(device)
+        done = torch.transpose(torch.cat(done, dim=-1), 0, 1)[:, :-1].to(device)
+        ret = torch.transpose(torch.cat(ret, dim=-1), 0, 1)[:, :-1].to(device)
         obs = obs[:, :-1]
 
         return obs.unsqueeze(dim=-1), obs1.unsqueeze(dim=-1), act, rew, done, ret
@@ -215,6 +216,7 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
 
     # Meta and Embedding networks
     meta_net = MetaLearnerNetwork(inp_dim=6, hidden_size=args.lstm_hidden_size, y_dim=args.m)
+    meta_net.to(device)
 
     # Set up optimizer for Metanetwork
     meta_optim = Adam(meta_net.parameters(), lr=args.meta_lr)
@@ -278,14 +280,18 @@ if __name__ == "__main__":
                         help="K, number of consecutive training iterations for the agent")
     parser.add_argument('--trajectory_steps', type=int, default=20, help="Number of steps between agent iterations")
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
-    parser.add_argument('--num_meta_iterations', type=int, default=500, help="Number of meta updates")
-    parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=1e5, help="Number of timesteps per lifetime")
+    parser.add_argument('--num_meta_iterations', type=int, default=5, help="Number of meta updates")
+    parser.add_argument('--num_lifetimes', type=int, default=2, help="Number of parallel lifetimes")
+    parser.add_argument('--lifetime_timesteps', type=int, default=1e3, help="Number of timesteps per lifetime")
     parser.add_argument('--parallel_environments', type=int, default=64, help="Number of parallel environments")
     parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
     parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
     parser.add_argument('--beta2', type=float, default=0.001, help="L2 regularization weight for pi hat, beta 2")
     parser.add_argument('--beta3', type=float, default=0.001, help="L2 regularization wright for y hat, beta 3")
     args = parser.parse_args()
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    print('CUDA Available:', torch.cuda.is_available())
 
     lpg()
