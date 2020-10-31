@@ -55,8 +55,6 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
 
     # Agent network
     agent = Agent(obs_dim=obs_dim, action_space=env_list[0].action_space, m=args.m)
-    agent.to(device)
-    agent.pi.to(device)
 
     # Set correct number of trajectory steps
     trajectory_steps = args.trajectory_steps + 1
@@ -77,12 +75,12 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
             done.append(data['done'].unsqueeze(dim=-1))
             ret.append(data['ret'].unsqueeze(dim=-1))
 
-        obs = torch.transpose(torch.cat(obs, dim=-1), 0, 1)
+        obs = torch.transpose(torch.cat(obs, dim=-1), 0, 1).to(device)
         obs1 = obs[:, 1:]
-        act = torch.transpose(torch.cat(act, dim=-1), 0, 1)[:, :-1]
-        rew = torch.transpose(torch.cat(rew, dim=-1), 0, 1)[:, :-1]
-        done = torch.transpose(torch.cat(done, dim=-1), 0, 1)[:, :-1]
-        ret = torch.transpose(torch.cat(ret, dim=-1), 0, 1)[:, :-1]
+        act = torch.transpose(torch.cat(act, dim=-1), 0, 1)[:, :-1].to(device)
+        rew = torch.transpose(torch.cat(rew, dim=-1), 0, 1)[:, :-1].to(device)
+        done = torch.transpose(torch.cat(done, dim=-1), 0, 1)[:, :-1].to(device)
+        ret = torch.transpose(torch.cat(ret, dim=-1), 0, 1)[:, :-1].to(device)
         obs = obs[:, :-1]
 
         return obs.unsqueeze(dim=-1), obs1.unsqueeze(dim=-1), act, rew, done, ret
@@ -92,14 +90,6 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
 
         # Get data
         obs, obs1, act, rew, done, ret = collect_data()
-
-        # Send to device
-        obs.to(device)
-        obs1.to(device)
-        act.to(device)
-        rew.to(device)
-        done.to(device)
-        ret.to(device)
 
         for _ in range(args.train_pi_iters):
 
@@ -199,6 +189,8 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
 
         # Call update function after K steps
         if (t + 1) % trajectory_steps == 0:
+            agent.to(device)
+            agent.pi.to(device)
             if agent_turn:
                 update_agent()
                 agent_turn = False
@@ -207,6 +199,8 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
                 meta_gradients = meta_gradients + meta_grad
                 meta_counter += 1
                 agent_turn = True
+            agent.to('cpu')
+            agent.pi.to('cpu')
 
     return meta_gradients / meta_counter, np.mean(returns)
 
