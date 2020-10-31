@@ -136,27 +136,27 @@ class MetaLearnerNetwork(nn.Module):
         fi_y1 = self.embed_y(y1)
 
         # Merge parameters
-        rollout_size = rew.shape[0]
-        gamma = torch.Tensor([gamma]).repeat(rollout_size).unsqueeze(dim=-1)
+        batch_size, rollout_size = rew.shape[0], rew.shape[1]
         rew = rew.unsqueeze(dim=-1)
         done = done.unsqueeze(dim=-1)
         prob = prob.unsqueeze(dim=-1)
+        gamma = gamma * torch.ones_like(prob)
         input = torch.cat((rew, done, gamma, prob, fi_y, fi_y1), dim=-1)
 
         # Initialize h vectors
-        h = torch.zeros((1, 1, self.hidden_size))
+        h = torch.zeros((1, batch_size, self.hidden_size))
 
         # We process the input backwards
-        input = torch.flip(input, dims=[0])
-        input = input.unsqueeze(dim=0)
+        input = torch.flip(input, dims=[1])
 
         # We initialize the output
-        output = torch.zeros((1, rollout_size, self.hidden_size))
+        output = torch.zeros((batch_size, rollout_size, self.hidden_size))
 
         # GRU pass
         for i in range(rollout_size):
-            if input[0, i, 1] == 1:
-                h = torch.zeros((1, 1, self.hidden_size))
+            done_filter = 1 - input[:, i:(i+1), 1]
+            done_filter = done_filter.unsqueeze(dim=0).repeat((1, 1, self.hidden_size))
+            h = h * done_filter
             inp = input[:, i:(i + 1), :]
             out, h = self.net(inp, h)
             output[:, i:(i+1), :] = out

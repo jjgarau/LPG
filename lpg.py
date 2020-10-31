@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -11,23 +13,21 @@ import matplotlib.pyplot as plt
 
 class DataBuffer:
 
-    def __init__(self, obs_dim, act_dim, size, gamma=0.99):
-        self.obs_buf = np.zeros(combined_shape(size, obs_dim), dtype=np.float32)
-        self.act_buf = np.zeros(combined_shape(size, act_dim), dtype=np.float32)
-        self.rew_buf = np.zeros(size, dtype=np.float32)
-        self.ret_buf = np.zeros(size, dtype=np.float32)
-        self.done_buf = np.zeros(size, dtype=np.float32)
-        self.logp_buf = np.zeros(size, dtype=np.float32)
-        self.ptr, self.path_start_idx, self.max_size = 0, 0, size
+    def __init__(self, obs_dim, act_dim, buf_size, gamma=0.99):
+        self.obs_buf = np.zeros(combined_shape(buf_size, obs_dim), dtype=np.float32)
+        self.act_buf = np.zeros(combined_shape(buf_size, act_dim), dtype=np.float32)
+        self.rew_buf = np.zeros(buf_size, dtype=np.float32)
+        self.ret_buf = np.zeros(buf_size, dtype=np.float32)
+        self.done_buf = np.zeros(buf_size, dtype=np.float32)
+        self.ptr, self.path_start_idx, self.max_size = 0, 0, buf_size
         self.gamma = gamma
 
-    def store(self, obs, act, rew, logp, done):
+    def store(self, obs, act, rew, done):
 
         assert self.ptr < self.max_size
         self.obs_buf[self.ptr] = obs
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
-        self.logp_buf[self.ptr] = logp
         self.done_buf[self.ptr] = done
         self.ptr += 1
 
@@ -43,60 +43,66 @@ class DataBuffer:
         assert self.ptr == self.max_size
         self.ptr, self.path_start_idx = 0, 0
         data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
-                    logp=self.logp_buf, rew=self.rew_buf, done=self.done_buf)
+                    rew=self.rew_buf, done=self.done_buf)
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
 
 
-def train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, beta1=0.001, beta2=0.001, beta3=0.001):
+def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, beta1=0.001, beta2=0.001, beta3=0.001):
 
     # Get environment parameters
-    obs_dim = len(env.observation_space.shape) + 1
-    act_dim = len(env.action_space.shape) + 1
+    obs_dim = len(env_list[0].observation_space.shape) + 1
+    act_dim = len(env_list[0].action_space.shape) + 1
 
     # Agent network
-    agent = Agent(obs_dim=obs_dim, action_space=env.action_space, m=args.m)
+    agent = Agent(obs_dim=obs_dim, action_space=env_list[0].action_space, m=args.m)
 
     # Set correct number of trajectory steps
     trajectory_steps = args.trajectory_steps + 1
+    env_batch_size = len(env_list)
 
     # Set up data buffer
-    buf = DataBuffer(obs_dim=obs_dim, act_dim=act_dim, size=trajectory_steps, gamma=args.gamma)
+    buf_list = [DataBuffer(obs_dim=obs_dim, act_dim=act_dim, buf_size=trajectory_steps, gamma=args.gamma)
+                for _ in range(env_batch_size)]
+
+    # Function to collect data from buffers
+    def collect_data():
+        obs, act, rew, done, ret = [], [], [], [], []
+        for buf in buf_list:
+            data = buf.get()
+            obs.append(data['obs'])
+            act.append(data['act'])
+            rew.append(data['rew'].unsqueeze(dim=-1))
+            done.append(data['done'].unsqueeze(dim=-1))
+            ret.append(data['ret'].unsqueeze(dim=-1))
+
+        obs = torch.transpose(torch.cat(obs, dim=-1), 0, 1)
+        obs1 = obs[:, 1:]
+        act = torch.transpose(torch.cat(act, dim=-1), 0, 1)[:, :-1]
+        rew = torch.transpose(torch.cat(rew, dim=-1), 0, 1)[:, :-1]
+        done = torch.transpose(torch.cat(done, dim=-1), 0, 1)[:, :-1]
+        ret = torch.transpose(torch.cat(ret, dim=-1), 0, 1)[:, :-1]
+        obs = obs[:, :-1]
+
+        return obs.unsqueeze(dim=-1), obs1.unsqueeze(dim=-1), act, rew, done, ret
 
     # Agent update function
-    def update_agent(eps=1e-7):
-        # Get data
-        data = buf.get()
-        obs, act, rew, done, ret = data['obs'], data['act'], data['rew'], data['done'], data['ret']
+    def update_agent():
 
-        # Get correct sizes for data and get observations for s_t+1
-        obs1 = obs[1:, :]
-        obs, act, rew, done, ret = obs[:-1, :], act[:-1, :], rew[:-1], done[:-1], ret[:-1]
+        # Get data
+        obs, obs1, act, rew, done, ret = collect_data()
 
         for _ in range(args.train_pi_iters):
 
             # Obtain logp vector for s_t
-            pi, logp = agent.pi(obs, act.squeeze())
-
-            # Compute pi entropy
-            ent_pi = pi.entropy()
+            _, logp = agent.pi(obs, act.squeeze())
 
             # Obtain the y vector for s_t and s_t+1
-            merge_obs = torch.cat((obs, obs1), dim=-1).unsqueeze(dim=-1)
-            merge_y = agent.pi.prediction_vector(merge_obs)
-            y = merge_y[:, 0, :].squeeze()
-            y1 = merge_y[:, 1, :].squeeze()
-
-            # Compute y entropy
-            ent_y = - y * torch.log2(y + eps) - (1 - y) * torch.log2(1 - y + eps)
-            ent_y = torch.sum(ent_y, dim=-1)
+            y = agent.pi.prediction_vector(obs)
+            y1 = agent.pi.prediction_vector(obs1)
 
             # Compute pi_hat and y_hat
             inp = (rew, done, args.gamma, torch.exp(logp), y, y1)
             pi_hat, y_hat = meta_net.get_estimations(inp)
-
-            # Compute L2 norms
-            l2_pi = torch.pow(pi_hat, 2)
-            l2_y = torch.sum(torch.pow(y_hat, 2), dim=-1)
 
             # Compute agent loss
             kl_term = torch.sum(F.kl_div(y, y_hat, reduction='none'), dim=-1)
@@ -110,15 +116,10 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, 
                 # Gradient ascent
                 state_dict[name] = state_dict[name] + lr * g[i]
 
-
     def get_meta_gradient(eps=1e-7):
-        # Get data
-        data = buf.get()
-        obs, act, rew, done, ret = data['obs'], data['act'], data['rew'], data['done'], data['ret']
 
-        # Get correct sizes for data and get observations for s_t+1
-        obs1 = obs[1:, :]
-        obs, act, rew, done, ret = obs[:-1, :], act[:-1, :], rew[:-1], done[:-1], ret[:-1]
+        # Get data
+        obs, obs1, act, rew, done, ret = collect_data()
 
         # Obtain logp vector for s_t
         pi, logp = agent.pi(obs, act.squeeze())
@@ -127,10 +128,8 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, 
         ent_pi = pi.entropy()
 
         # Obtain the y vector for s_t and s_t+1
-        merge_obs = torch.cat((obs, obs1), dim=-1).unsqueeze(dim=-1)
-        merge_y = agent.pi.prediction_vector(merge_obs)
-        y = merge_y[:, 0, :].squeeze()
-        y1 = merge_y[:, 1, :].squeeze()
+        y = agent.pi.prediction_vector(obs)
+        y1 = agent.pi.prediction_vector(obs1)
 
         # Compute y entropy
         ent_y = - y * torch.log2(y + eps) - (1 - y) * torch.log2(1 - y + eps)
@@ -150,7 +149,9 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, 
         return meta_grad.mean()
 
     # Prepare for interaction with environment
-    o, ep_ret, ep_len = env.reset(), 0, 0
+    ep_ret = [0 for _ in range(env_batch_size)]
+    ep_len = [0 for _ in range(env_batch_size)]
+    o = np.array([env.reset() for env in env_list])
 
     # Metagradients and returns
     returns = []
@@ -165,21 +166,22 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, 
         a, logp = agent.step(torch.as_tensor(o, dtype=torch.float32))
 
         # Environment next step
-        next_o, r, d, _ = env.step(a)
-        ep_ret += r
-        ep_len += 1
+        for i, env in enumerate(env_list):
+            next_o, r, d, _ = env.step(a[i])
+            ep_ret[i] += r
+            ep_len[i] += 1
 
-        # Save in buffer
-        buf.store(o, a, r, logp, d)
+            # Save in buffer
+            buf_list[i].store(o[i], a[i], r, d)
 
-        # Update obs
-        o = next_o
+            # Update obs
+            o[i] = next_o
 
-        # Resetting the episode if current ended
-        if d:
-            buf.finish_path()
-            returns.append(ep_ret)
-            o, ep_ret, ep_len = env.reset(), 0, 0
+            # Resetting the episode if current ended
+            if d:
+                buf_list[i].finish_path()
+                returns.append(ep_ret[i])
+                o[i], ep_ret[i], ep_len[i] = env.reset(), 0, 0
 
         # Print iteration number
         if (t + 1) % 10000 == 0:
@@ -238,10 +240,10 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
             lr, kl_cost = comb
 
             # Create the environment
-            env = env_dict[env_name]()
+            env_list = [env_dict[env_name]() for _ in range(args.parallel_environments)]
 
             # Train the agent and receive the metagradients
-            meta_losses, returns = train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=args.lifetime_timesteps,
+            meta_losses, returns = train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=args.lifetime_timesteps,
                                                beta0=args.beta0, beta1=args.beta1, beta2=args.beta2, beta3=args.beta3)
             lifetimes_meta_losses.append(meta_losses)
             all_returns.append(returns)
@@ -255,7 +257,7 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
         meta_optim.step()
 
     plt.plot(all_returns)
-    plt.show()
+    plt.savefig('returns.png')
 
 
 def lpg():
@@ -276,9 +278,10 @@ if __name__ == "__main__":
                         help="K, number of consecutive training iterations for the agent")
     parser.add_argument('--trajectory_steps', type=int, default=20, help="Number of steps between agent iterations")
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
-    parser.add_argument('--num_meta_iterations', type=int, default=300, help="Number of meta updates")
-    parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=2e4, help="Number of timesteps per lifetime")
+    parser.add_argument('--num_meta_iterations', type=int, default=5, help="Number of meta updates")
+    parser.add_argument('--num_lifetimes', type=int, default=2, help="Number of parallel lifetimes")
+    parser.add_argument('--lifetime_timesteps', type=int, default=5e3, help="Number of timesteps per lifetime")
+    parser.add_argument('--parallel_environments', type=int, default=4, help="Number of parallel environments")
     parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
     parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
     parser.add_argument('--beta2', type=float, default=0.001, help="L2 regularization weight for pi hat, beta 2")
