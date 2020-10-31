@@ -56,6 +56,7 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
     # Agent network
     agent = Agent(obs_dim=obs_dim, action_space=env_list[0].action_space, m=args.m)
     agent.to(device)
+    agent.pi.to(device)
 
     # Set correct number of trajectory steps
     trajectory_steps = args.trajectory_steps + 1
