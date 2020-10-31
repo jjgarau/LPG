@@ -4,7 +4,7 @@ from gym.spaces import Discrete
 import numpy as np
 
 
-lower = 3
+lower = 5
 upper_short = 10
 upper_long = 15
 
@@ -36,7 +36,7 @@ class DelayedChainMDP(Env):
 
     def __init__(self):
         self.counter = 0  # the episode ends after delayed_chain_length steps
-        self.initial_action = 0
+        self.initial_action = -1
         self.initial_target_state = random.randint(0, 1)  # the first decision determines the reward
         self.chain_length = random.randint(self.lowerbound, self.upperbound)
         self.action_space = Discrete(2)
@@ -69,7 +69,7 @@ class DelayedChainMDP(Env):
         self.counter += 1
         done = False
         reward = 0
-        if self.counter == 1:
+        if self.counter <= 1:
             self.initial_action = action
         elif self.counter == self.chain_length:
             done = True
@@ -96,8 +96,8 @@ class DelayedChainMDP(Env):
             observation (object): the initial observation.
         """
         self.counter = 0  # the episode ends after delayed_chain_length steps
-        self.initial_action = 0
-        self.initial_target_state = random.randint(0, 1)  # the first decision determines the reward
+        self.initial_action = -1
+        # self.initial_target_state = random.randint(0, 1)  # the first decision determines the reward
 
         return self._get_observation()
 
@@ -134,7 +134,8 @@ class LongNoisyDelayedChainMDP(LongDelayedChainMDP):
         return random.choice([-1, 1])
 
 
-ENVIRONMENTS = [ShortDelayedChainMDP, LongDelayedChainMDP, ShortNoisyDelayedChainMDP, LongNoisyDelayedChainMDP]
+# ENVIRONMENTS = [ShortDelayedChainMDP, LongDelayedChainMDP, ShortNoisyDelayedChainMDP, LongNoisyDelayedChainMDP]
+ENVIRONMENTS = [ShortDelayedChainMDP]
 
 
 def get_env_dist():
