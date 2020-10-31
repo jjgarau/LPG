@@ -2,7 +2,11 @@ from gym import Env
 import random
 from gym.spaces import Discrete
 import numpy as np
-import abc
+
+
+lower = 3
+upper_short = 10
+upper_long = 15
 
 
 class DelayedChainMDP(Env):
@@ -101,8 +105,8 @@ class DelayedChainMDP(Env):
 class ShortDelayedChainMDP(DelayedChainMDP):
 
     name = "short"
-    lowerbound = 5
-    upperbound = 50
+    lowerbound = lower
+    upperbound = upper_short
     lrs = [20, 40, 80]
     kl_costs = [0.1, 0.5, 1]
 
@@ -111,14 +115,14 @@ class ShortNoisyDelayedChainMDP(ShortDelayedChainMDP):
     name = "short-noisy"
 
     def noisy_reward(self):
-        return random.uniform(-1, 1)
+        return random.choice([-1, 1])
 
 
 class LongDelayedChainMDP(DelayedChainMDP):
 
     name = "long"
-    lowerbound = 5
-    upperbound = 50
+    lowerbound = lower
+    upperbound = upper_long
     lrs = [20, 40, 80]
     kl_costs = [0.1, 0.5, 1]
 
@@ -127,7 +131,7 @@ class LongNoisyDelayedChainMDP(LongDelayedChainMDP):
     name = "long-noisy"
 
     def noisy_reward(self):
-        return random.uniform(-1, 1)
+        return random.choice([-1, 1])
 
 
 ENVIRONMENTS = [ShortDelayedChainMDP, LongDelayedChainMDP, ShortNoisyDelayedChainMDP, LongNoisyDelayedChainMDP]
