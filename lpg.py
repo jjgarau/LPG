@@ -249,15 +249,15 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
             all_returns.append(returns)
 
             # Update bandit
-            parameter_bandit.update_bandits(env_name, comb, np.mean(returns))
+            parameter_bandit.update_bandits(env_name, comb, returns)
 
         # Gradient ascent
         loss = -1 * sum(lifetimes_meta_losses) / len(lifetimes_meta_losses)
         loss.backward()
         meta_optim.step()
 
-    plt.plot(all_returns)
-    plt.savefig('returns.png')
+        plt.plot(all_returns)
+        plt.savefig('returns.png')
 
 
 def lpg():
@@ -278,10 +278,10 @@ if __name__ == "__main__":
                         help="K, number of consecutive training iterations for the agent")
     parser.add_argument('--trajectory_steps', type=int, default=20, help="Number of steps between agent iterations")
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
-    parser.add_argument('--num_meta_iterations', type=int, default=5, help="Number of meta updates")
-    parser.add_argument('--num_lifetimes', type=int, default=2, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=5e3, help="Number of timesteps per lifetime")
-    parser.add_argument('--parallel_environments', type=int, default=4, help="Number of parallel environments")
+    parser.add_argument('--num_meta_iterations', type=int, default=500, help="Number of meta updates")
+    parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
+    parser.add_argument('--lifetime_timesteps', type=int, default=1e5, help="Number of timesteps per lifetime")
+    parser.add_argument('--parallel_environments', type=int, default=64, help="Number of parallel environments")
     parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
     parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
     parser.add_argument('--beta2', type=float, default=0.001, help="L2 regularization weight for pi hat, beta 2")
