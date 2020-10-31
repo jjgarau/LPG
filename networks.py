@@ -7,6 +7,9 @@ from torch.distributions.normal import Normal
 from gym.spaces import Box, Discrete
 
 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+
 class AgentNetwork(nn.Module):
 
     def __init__(self, obs_dim, m, round_y):
@@ -155,7 +158,7 @@ class MetaLearnerNetwork(nn.Module):
         # GRU pass
         for i in range(rollout_size):
             done_filter = 1 - input[:, i:(i+1), 1]
-            done_filter = done_filter.unsqueeze(dim=0).repeat((1, 1, self.hidden_size))
+            done_filter = done_filter.unsqueeze(dim=0).repeat((1, 1, self.hidden_size)).to(device)
             h = h * done_filter
             inp = input[:, i:(i + 1), :]
             out, h = self.net(inp, h)
