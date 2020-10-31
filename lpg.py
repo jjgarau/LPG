@@ -56,21 +56,21 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, 
     # Agent network
     agent = Agent(obs_dim=obs_dim, action_space=env.action_space, m=args.m)
 
+    # Set correct number of trajectory steps
+    trajectory_steps = args.trajectory_steps + 1
+
     # Set up data buffer
-    buf = DataBuffer(obs_dim=obs_dim, act_dim=act_dim, size=args.trajectory_steps, gamma=args.gamma)
+    buf = DataBuffer(obs_dim=obs_dim, act_dim=act_dim, size=trajectory_steps, gamma=args.gamma)
 
     # Agent update function
     def update_agent(eps=1e-7):
         # Get data
         data = buf.get()
-        # TODO: HOW TO DEFINE RETURN VECTOR
         obs, act, rew, done, ret = data['obs'], data['act'], data['rew'], data['done'], data['ret']
 
-        # Roll the observation vector to get s_t+1
-        # TODO: I JUST DO A ROLL, IS IT OK?
-        obs1 = torch.roll(obs, shifts=-1, dims=0)
-
-        meta_loss = 0
+        # Get correct sizes for data and get observations for s_t+1
+        obs1 = obs[1:, :]
+        obs, act, rew, done, ret = obs[:-1, :], act[:-1, :], rew[:-1], done[:-1], ret[:-1]
 
         for _ in range(args.train_pi_iters):
 
@@ -110,20 +110,53 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, 
                 # Gradient ascent
                 state_dict[name] = state_dict[name] + lr * g[i]
 
-        # Compute meta_loss and update
-        # TODO: AM I DOING THIS CORRECTLY?
-        meta_loss_update = logp * ret + beta0 * ent_pi + beta1 * ent_y - beta2 * l2_pi - beta3 * l2_y
-        meta_loss = meta_loss + meta_loss_update
 
-        return meta_loss.mean()
+    def get_meta_gradient(eps=1e-7):
+        # Get data
+        data = buf.get()
+        obs, act, rew, done, ret = data['obs'], data['act'], data['rew'], data['done'], data['ret']
+
+        # Get correct sizes for data and get observations for s_t+1
+        obs1 = obs[1:, :]
+        obs, act, rew, done, ret = obs[:-1, :], act[:-1, :], rew[:-1], done[:-1], ret[:-1]
+
+        # Obtain logp vector for s_t
+        pi, logp = agent.pi(obs, act.squeeze())
+
+        # Compute pi entropy
+        ent_pi = pi.entropy()
+
+        # Obtain the y vector for s_t and s_t+1
+        merge_obs = torch.cat((obs, obs1), dim=-1).unsqueeze(dim=-1)
+        merge_y = agent.pi.prediction_vector(merge_obs)
+        y = merge_y[:, 0, :].squeeze()
+        y1 = merge_y[:, 1, :].squeeze()
+
+        # Compute y entropy
+        ent_y = - y * torch.log2(y + eps) - (1 - y) * torch.log2(1 - y + eps)
+        ent_y = torch.sum(ent_y, dim=-1)
+
+        # Compute pi_hat and y_hat
+        inp = (rew, done, args.gamma, torch.exp(logp), y, y1)
+        pi_hat, y_hat = meta_net(inp)
+
+        # Compute L2 norms
+        l2_pi = torch.pow(pi_hat, 2)
+        l2_y = torch.sum(torch.pow(y_hat, 2), dim=-1)
+
+        # Compute meta gradients
+        meta_grad = logp * ret + beta0 * ent_pi + beta1 * ent_y - beta2 * l2_pi - beta3 * l2_y
+
+        return meta_grad.mean()
 
     # Prepare for interaction with environment
     o, ep_ret, ep_len = env.reset(), 0, 0
 
     # Metagradients and returns
     returns = []
-    meta_losses = 0
+    meta_gradients = 0
     meta_counter = 0
+    agent_turn = True
 
     # Main loop: collect experience in env
     for t in range(int(lifetime_timesteps)):
@@ -153,12 +186,17 @@ def train_agent(env, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, 
             print(t + 1)
 
         # Call update function after K steps
-        if (t + 1) % args.trajectory_steps == 0:
-            meta_loss = update_agent()
-            meta_losses = meta_losses + meta_loss
-            meta_counter += 1
+        if (t + 1) % trajectory_steps == 0:
+            if agent_turn:
+                update_agent()
+                agent_turn = False
+            else:
+                meta_grad = get_meta_gradient()
+                meta_gradients = meta_gradients + meta_grad
+                meta_counter += 1
+                agent_turn = True
 
-    return meta_losses / meta_counter, np.mean(returns)
+    return meta_gradients / meta_counter, np.mean(returns)
 
 
 def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifetimes=1, seed=0):
@@ -228,7 +266,7 @@ def lpg():
 
 
 if __name__ == "__main__":
-    torch.autograd.set_detect_anomaly(True)
+    # torch.autograd.set_detect_anomaly(True)
 
     parser = argparse.ArgumentParser(description="Main script for running LPG")
     parser.add_argument('--lstm_hidden_size', type=int, default=256, help="Hidden size of the LSTM meta network")
@@ -238,7 +276,7 @@ if __name__ == "__main__":
                         help="K, number of consecutive training iterations for the agent")
     parser.add_argument('--trajectory_steps', type=int, default=20, help="Number of steps between agent iterations")
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
-    parser.add_argument('--num_meta_iterations', type=int, default=100, help="Number of meta updates")
+    parser.add_argument('--num_meta_iterations', type=int, default=300, help="Number of meta updates")
     parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
     parser.add_argument('--lifetime_timesteps', type=int, default=2e4, help="Number of timesteps per lifetime")
     parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")

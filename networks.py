@@ -105,12 +105,11 @@ class MetaLearnerNetwork(nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
         self.round_y = round_y
-        # TODO: CLARIFY IF THIS IS BIDIRECTIONAL LSTM OR EPISODE RUNNING BACKWARDS
 
         # Meta network
-        self.net = nn.LSTM(input_size=inp_dim, hidden_size=hidden_size, bidirectional=True, batch_first=True)
-        self.fc_y = nn.Linear(hidden_size * 2, y_dim)
-        self.fc_pi = nn.Linear(hidden_size * 2, 1)
+        self.net = nn.GRU(input_size=inp_dim, hidden_size=hidden_size, batch_first=True)
+        self.fc_y = nn.Linear(hidden_size, y_dim)
+        self.fc_pi = nn.Linear(hidden_size, 1)
 
         # Embedding network
         self.embed_fc1 = nn.Linear(y_dim, 16)
@@ -122,12 +121,12 @@ class MetaLearnerNetwork(nn.Module):
         y = self.embed_fc2(y)
         return torch.sigmoid(y)
 
-    def get_estimations(self, inp, h=None, c=None):
+    def get_estimations(self, inp):
         with torch.no_grad():
-            pi, y = self.forward(inp, h, c)
+            pi, y = self.forward(inp)
         return pi, y
 
-    def forward(self, inp, h=None, c=None):
+    def forward(self, inp):
 
         # Get input
         rew, done, gamma, prob, y, y1 = inp
@@ -137,36 +136,37 @@ class MetaLearnerNetwork(nn.Module):
         fi_y1 = self.embed_y(y1)
 
         # Merge parameters
-        batch_size = rew.shape[0]
-        gamma = torch.Tensor([gamma]).repeat(batch_size).unsqueeze(dim=-1)
+        rollout_size = rew.shape[0]
+        gamma = torch.Tensor([gamma]).repeat(rollout_size).unsqueeze(dim=-1)
         rew = rew.unsqueeze(dim=-1)
         done = done.unsqueeze(dim=-1)
         prob = prob.unsqueeze(dim=-1)
         input = torch.cat((rew, done, gamma, prob, fi_y, fi_y1), dim=-1)
-        # TODO: SEQUENCE DIM
-        input = input.unsqueeze(dim=1)
 
-        # Initialize h and c vectors
-        h = torch.zeros((2, batch_size, self.hidden_size)) if h is None else h
-        c = torch.zeros((2, batch_size, self.hidden_size)) if c is None else c
+        # Initialize h vectors
+        h = torch.zeros((1, 1, self.hidden_size))
 
-        # Done mask
-        mask = torch.roll(done, shifts=1, dims=0)
-        mask = mask.repeat((2, 1, self.hidden_size))
-        mask = torch.ones_like(mask) - mask
-        h = torch.mul(h, mask)
-        c = torch.mul(c, mask)
+        # We process the input backwards
+        input = torch.flip(input, dims=[0])
+        input = input.unsqueeze(dim=0)
 
-        # LSTM pass
-        # TODO: WHAT DO WE DO WITH H AND C? RESET AFTER EACH EPISODE
-        out, (h, c) = self.net(input, (h, c))
+        # We initialize the output
+        output = torch.zeros((1, rollout_size, self.hidden_size))
+
+        # GRU pass
+        for i in range(rollout_size):
+            if input[0, i, 1] == 1:
+                h = torch.zeros((1, 1, self.hidden_size))
+            inp = input[:, i:(i + 1), :]
+            out, h = self.net(inp, h)
+            output[:, i:(i+1), :] = out
 
         # Computing y_hat and pi_hat
-        y = self.fc_y(out)
+        y = self.fc_y(output)
         y = torch.sigmoid(y)
         if self.round_y:
             y = torch.round(y)
-        pi = self.fc_pi(out)
+        pi = self.fc_pi(output)
         pi, y = pi.squeeze(), y.squeeze()
 
         return pi, y
