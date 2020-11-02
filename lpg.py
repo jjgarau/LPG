@@ -11,6 +11,7 @@ from utils import ParameterBandit, combined_shape, discount_cumsum, moving_avera
 import matplotlib.pyplot as plt
 import os
 import datetime
+import json
 
 
 class DataBuffer:
@@ -49,7 +50,8 @@ class DataBuffer:
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
 
 
-def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, beta1=0.001, beta2=0.001, beta3=0.001):
+def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0.01, beta1=0.001, beta2=0.001,
+                beta3=0.001):
 
     # Get environment parameters
     obs_dim = len(env_list[0].observation_space.shape) + 1
@@ -122,7 +124,7 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
                 state_dict[name] = state_dict[name] + lr * g[i]
             agent.pi.load_state_dict(state_dict)
 
-    def get_meta_gradient(eps=1e-7, eps_ent=1e-3, can_break=True):
+    def get_meta_gradient(eps=1e-7, eps_ent=1e-2, can_break=True):
 
         # Get data
         obs, obs1, act, rew, done, ret = collect_data()
@@ -316,6 +318,10 @@ def lpg():
     os.makedirs('results', exist_ok=True)
     results_folder = os.path.join('results', 'simulation_' + str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")))
     os.makedirs(results_folder, exist_ok=True)
+
+    sim_params = vars(args)
+    with open(os.path.join(results_folder, 'arguments.txt'), 'w') as file:
+        file.write(json.dumps(sim_params))
 
     env_dist = get_env_dist()
     init_agent_param_dist = None
