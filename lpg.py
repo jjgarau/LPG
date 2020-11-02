@@ -343,7 +343,7 @@ if __name__ == "__main__":
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
     parser.add_argument('--num_meta_iterations', type=int, default=5000, help="Number of meta updates")
     parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=5e4, help="Number of timesteps per lifetime")
+    parser.add_argument('--lifetime_timesteps', type=int, default=2.5e4, help="Number of timesteps per lifetime")
     parser.add_argument('--parallel_environments', type=int, default=64, help="Number of parallel environments")
     parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
     parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
