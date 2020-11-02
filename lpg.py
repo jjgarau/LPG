@@ -145,8 +145,12 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
 
         # Compute meta gradients
         meta_grad = logp * ret + beta0 * ent_pi + beta1 * ent_y - beta2 * l2_pi - beta3 * l2_y
+        meta_grad = meta_grad.mean()
 
-        return meta_grad.mean()
+        meta_grad = torch.autograd.grad(meta_grad, meta_net.parameters(), retain_graph=False)
+
+        # return meta_grad.mean()
+        return meta_grad
 
     # Prepare for interaction with environment
     ep_ret = [0 for _ in range(env_batch_size)]
@@ -155,7 +159,7 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
 
     # Metagradients and returns
     returns = []
-    meta_gradients = 0
+    meta_gradients = None
     meta_counter = 0
     agent_turn = True
 
@@ -196,13 +200,22 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
                 agent_turn = False
             else:
                 meta_grad = get_meta_gradient()
-                meta_gradients = meta_gradients + meta_grad
+                # meta_gradients = meta_gradients + meta_grad
+                if meta_gradients is None:
+                    meta_gradients = list(meta_grad)
+                else:
+                    for i in range(len(meta_grad)):
+                        meta_gradients[i] = meta_gradients[i] + meta_grad[i]
                 meta_counter += 1
                 agent_turn = True
             agent.to('cpu')
             agent.pi.to('cpu')
 
-    return meta_gradients / meta_counter, np.mean(returns)
+    for i in range(len(meta_gradients)):
+        meta_gradients[i] = meta_gradients[i] / meta_counter
+
+    # return meta_gradients / meta_counter, np.mean(returns)
+    return meta_gradients, np.mean(returns)
 
 
 def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifetimes=1, seed=0):
@@ -222,7 +235,7 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
     meta_net.to(device)
 
     # Set up optimizer for Metanetwork
-    meta_optim = Adam(meta_net.parameters(), lr=args.meta_lr)
+    # meta_optim = Adam(meta_net.parameters(), lr=args.meta_lr)
 
     # Tracking returns
     all_returns = []
@@ -232,7 +245,7 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
         print("Meta iteration", it + 1)
 
         # Initialize meta optim
-        meta_optim.zero_grad()
+        # meta_optim.zero_grad()
 
         lifetimes_meta_losses = []
 
@@ -257,14 +270,19 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
             parameter_bandit.update_bandits(env_name, comb, returns)
 
         # Gradient ascent
-        loss = -1 * sum(lifetimes_meta_losses) / len(lifetimes_meta_losses)
-        loss.backward()
-        meta_optim.step()
+        # loss = -1 * sum(lifetimes_meta_losses) / len(lifetimes_meta_losses)
+        # loss.backward()
+        # meta_optim.step()
+
+        state_dict = meta_net.state_dict()
+        for i, (name, param) in enumerate(state_dict.items()):
+            # Gradient ascent
+            state_dict[name] = state_dict[name] + args.meta_lr * sum(m[i] for m in lifetimes_meta_losses)
 
         plt.plot(all_returns)
         plt.xlabel('Meta iteration')
         plt.ylabel('Average return over lifetime')
-        plt.savefig('returns.png')
+        plt.savefig('returns3.png')
         plt.close()
 
 
@@ -288,7 +306,7 @@ if __name__ == "__main__":
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
     parser.add_argument('--num_meta_iterations', type=int, default=5000, help="Number of meta updates")
     parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=1e5, help="Number of timesteps per lifetime")
+    parser.add_argument('--lifetime_timesteps', type=int, default=5e4, help="Number of timesteps per lifetime")
     parser.add_argument('--parallel_environments', type=int, default=64, help="Number of parallel environments")
     parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
     parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
@@ -296,7 +314,7 @@ if __name__ == "__main__":
     parser.add_argument('--beta3', type=float, default=0.001, help="L2 regularization wright for y hat, beta 3")
     args = parser.parse_args()
 
-    device = 'cuda' if torch.cuda.is_available() and args.lifetime_timesteps <= 1e4 else 'cpu'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     print('CUDA Available:', torch.cuda.is_available())
 
