@@ -157,6 +157,7 @@ class MetaLearnerNetwork(nn.Module):
 
         # GRU pass
         for i in range(rollout_size):
+            # Reset h if episode is done
             done_filter = 1 - input[:, i:(i+1), 1]
             done_filter = done_filter.unsqueeze(dim=0).repeat((1, 1, self.hidden_size))
             h = h * done_filter

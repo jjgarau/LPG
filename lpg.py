@@ -262,7 +262,10 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
         meta_optim.step()
 
         plt.plot(all_returns)
+        plt.xlabel('Meta iteration')
+        plt.ylabel('Average return over lifetime')
         plt.savefig('returns.png')
+        plt.close()
 
 
 def lpg():
@@ -285,7 +288,7 @@ if __name__ == "__main__":
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
     parser.add_argument('--num_meta_iterations', type=int, default=5000, help="Number of meta updates")
     parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=1e4, help="Number of timesteps per lifetime")
+    parser.add_argument('--lifetime_timesteps', type=int, default=1e5, help="Number of timesteps per lifetime")
     parser.add_argument('--parallel_environments', type=int, default=64, help="Number of parallel environments")
     parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
     parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
@@ -293,7 +296,7 @@ if __name__ == "__main__":
     parser.add_argument('--beta3', type=float, default=0.001, help="L2 regularization wright for y hat, beta 3")
     args = parser.parse_args()
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda' if torch.cuda.is_available() and args.lifetime_timesteps <= 1e4 else 'cpu'
 
     print('CUDA Available:', torch.cuda.is_available())
 
