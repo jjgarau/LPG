@@ -218,7 +218,7 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
     # TODO: CODE THE INITIAL PARAMETER DISTRIBUTION, distribution on theta
 
     # Meta and Embedding networks
-    meta_net = MetaLearnerNetwork(inp_dim=6, hidden_size=args.lstm_hidden_size, y_dim=args.m)
+    meta_net = MetaLearnerNetwork(inp_dim=6, hidden_size=args.lstm_hidden_size, y_dim=args.m, device=device)
     meta_net.to(device)
 
     # Set up optimizer for Metanetwork

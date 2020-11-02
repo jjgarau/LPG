@@ -7,9 +7,6 @@ from torch.distributions.normal import Normal
 from gym.spaces import Box, Discrete
 
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-
 class AgentNetwork(nn.Module):
 
     def __init__(self, obs_dim, m, round_y):
@@ -104,7 +101,7 @@ class Agent(nn.Module):
 
 class MetaLearnerNetwork(nn.Module):
 
-    def __init__(self, inp_dim, hidden_size, y_dim, round_y=False):
+    def __init__(self, inp_dim, hidden_size, y_dim, round_y=False, device='cpu'):
         super().__init__()
         self.hidden_size = hidden_size
         self.round_y = round_y
@@ -117,6 +114,8 @@ class MetaLearnerNetwork(nn.Module):
         # Embedding network
         self.embed_fc1 = nn.Linear(y_dim, 16)
         self.embed_fc2 = nn.Linear(16, 1)
+
+        self.device = device
 
     def embed_y(self, y):
         y = self.embed_fc1(y)
@@ -147,13 +146,13 @@ class MetaLearnerNetwork(nn.Module):
         input = torch.cat((rew, done, gamma, prob, fi_y, fi_y1), dim=-1)
 
         # Initialize h vectors
-        h = torch.zeros((1, batch_size, self.hidden_size)).to(device)
+        h = torch.zeros((1, batch_size, self.hidden_size)).to(self.device)
 
         # We process the input backwards
         input = torch.flip(input, dims=[1])
 
         # We initialize the output
-        output = torch.zeros((batch_size, rollout_size, self.hidden_size)).to(device)
+        output = torch.zeros((batch_size, rollout_size, self.hidden_size)).to(self.device)
 
         # GRU pass
         for i in range(rollout_size):
