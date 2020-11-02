@@ -52,3 +52,9 @@ def combined_shape(length, shape=None):
 
 def discount_cumsum(x, discount):
     return lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
+
+
+def moving_average(a, n=10):
+    ret = np.cumsum(a)
+    ret[n:] = ret[n:] - ret[:-n]
+    return ret[n - 1:] / n

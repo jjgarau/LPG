@@ -7,8 +7,10 @@ from torch.optim import Adam
 import argparse
 from environments import get_env_dist
 from networks import MetaLearnerNetwork, Agent
-from utils import ParameterBandit, combined_shape, discount_cumsum
+from utils import ParameterBandit, combined_shape, discount_cumsum, moving_average
 import matplotlib.pyplot as plt
+import os
+import datetime
 
 
 class DataBuffer:
@@ -93,6 +95,9 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
 
         for _ in range(args.train_pi_iters):
 
+            # Clear gradients
+            agent.pi.zero_grad()
+
             # Obtain logp vector for s_t
             _, logp = agent.pi(obs, act.squeeze())
 
@@ -106,17 +111,18 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
 
             # Compute agent loss
             kl_term = torch.sum(F.kl_div(y, y_hat, reduction='none'), dim=-1)
-            loss = logp * pi_hat - kl_cost * kl_term
+            loss = logp * pi_hat - 0.001 * kl_cost * kl_term
             loss = loss.mean()
 
             # Optimize
             g = torch.autograd.grad(loss, agent.pi.parameters(), retain_graph=True)
-            state_dict = agent.state_dict()
+            state_dict = agent.pi.state_dict()
             for i, (name, param) in enumerate(state_dict.items()):
                 # Gradient ascent
                 state_dict[name] = state_dict[name] + lr * g[i]
+            agent.pi.load_state_dict(state_dict)
 
-    def get_meta_gradient(eps=1e-7):
+    def get_meta_gradient(eps=1e-7, eps_ent=1e-3, can_break=True):
 
         # Get data
         obs, obs1, act, rew, done, ret = collect_data()
@@ -126,6 +132,10 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
 
         # Compute pi entropy
         ent_pi = pi.entropy()
+
+        # Break if policy becomes deterministic
+        if ent_pi.mean().item() < eps_ent and can_break:
+            return None
 
         # Obtain the y vector for s_t and s_t+1
         y = agent.pi.prediction_vector(obs)
@@ -199,8 +209,11 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
                 update_agent()
                 agent_turn = False
             else:
-                meta_grad = get_meta_gradient()
-                # meta_gradients = meta_gradients + meta_grad
+                can_break = True if t + 1 > 10 * trajectory_steps else False
+                meta_grad = get_meta_gradient(can_break=can_break)
+                # Break to prevent early divergence
+                if meta_grad is None:
+                    break
                 if meta_gradients is None:
                     meta_gradients = list(meta_grad)
                 else:
@@ -218,7 +231,7 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
     return meta_gradients, np.mean(returns)
 
 
-def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifetimes=1, seed=0):
+def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifetimes=1, seed=0, results_folder=None):
 
     # Random seed
     torch.manual_seed(seed)
@@ -246,6 +259,9 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
 
         # Initialize meta optim
         # meta_optim.zero_grad()
+
+        # Clear gradients
+        meta_net.zero_grad()
 
         lifetimes_meta_losses = []
 
@@ -278,19 +294,34 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
         for i, (name, param) in enumerate(state_dict.items()):
             # Gradient ascent
             state_dict[name] = state_dict[name] + args.meta_lr * sum(m[i] for m in lifetimes_meta_losses)
+        meta_net.load_state_dict(state_dict)
 
         plt.plot(all_returns)
         plt.xlabel('Meta iteration')
         plt.ylabel('Average return over lifetime')
-        plt.savefig('returns3.png')
+        plt.savefig(os.path.join(results_folder, 'returns.pdf'), bbox_inches='tight')
         plt.close()
+
+        if len(all_returns) > 10:
+            plt.plot(moving_average(all_returns, n=10))
+            plt.xlabel('Meta iteration')
+            plt.ylabel('Moving average of return over lifetime')
+            plt.savefig(os.path.join(results_folder, 'returns_ma.pdf'), bbox_inches='tight')
+            plt.close()
+
+        torch.save(meta_net, os.path.join(results_folder, 'model.pkl'))
 
 
 def lpg():
+    os.makedirs('results', exist_ok=True)
+    results_folder = os.path.join('results', 'simulation_' + str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")))
+    os.makedirs(results_folder, exist_ok=True)
+
     env_dist = get_env_dist()
     init_agent_param_dist = None
     train_lpg(env_dist=env_dist, init_agent_param_dist=init_agent_param_dist,
-              num_meta_iterations=args.num_meta_iterations, num_lifetimes=args.num_lifetimes)
+              num_meta_iterations=args.num_meta_iterations, num_lifetimes=args.num_lifetimes,
+              results_folder=results_folder)
 
 
 if __name__ == "__main__":
@@ -306,7 +337,7 @@ if __name__ == "__main__":
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
     parser.add_argument('--num_meta_iterations', type=int, default=5000, help="Number of meta updates")
     parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=5e4, help="Number of timesteps per lifetime")
+    parser.add_argument('--lifetime_timesteps', type=int, default=1e4, help="Number of timesteps per lifetime")
     parser.add_argument('--parallel_environments', type=int, default=64, help="Number of parallel environments")
     parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
     parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
