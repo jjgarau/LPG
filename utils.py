@@ -1,5 +1,7 @@
 import numpy as np
 from scipy.signal import lfilter
+from scipy.stats import sem, t
+import matplotlib.pyplot as plt
 
 
 class ParameterBandit:
@@ -58,3 +60,30 @@ def moving_average(a, n=10):
     ret = np.cumsum(a)
     ret[n:] = ret[n:] - ret[:-n]
     return ret[n - 1:] / n
+
+
+def make_plot(data_y, xlab, ylab, path, func=lambda x: x, confidence=0.95, plot_ci=True):
+    f, ax = plt.subplots(**{'figsize': (12, 8)})
+    ax.grid(color='#c7c7c7', linestyle='--', linewidth=1)
+
+    if len(data_y[0]) > 1:
+        means, uppers, lowers = [], [], []
+        for i in range(len(data_y)):
+            n, m, std_err = len(data_y[i]), np.mean(data_y[i]), sem(data_y[i])
+            h = std_err * t.ppf((1 + confidence) / 2, n - 1)
+            means.append(m)
+            uppers.append(m + h)
+            lowers.append(m - h)
+        m = func(means)
+        ax.plot(m, color='#539caf', alpha=1)
+        if plot_ci:
+            ax.fill_between(range(len(m)), y1=func(lowers), y2=func(uppers), color='#539caf', alpha=0.4)
+    else:
+        data = [d[0] for d in data_y]
+        ax.plot(func(data), color='#539caf', alpha=1)
+
+    ax.set_xlabel(xlab)
+    ax.set_ylabel(ylab)
+    ax.set_ylim(-1, 1)
+    f.savefig(path, bbox_inches='tight')
+    plt.close(fig=f)

@@ -107,7 +107,7 @@ class ShortDelayedChainMDP(DelayedChainMDP):
     name = "short"
     lowerbound = lower
     upperbound = upper_short
-    lrs = [20, 40, 80]
+    lrs = [20, 40, 80, 160, 320]
     kl_costs = [0.1, 0.5, 1]
 
 class ShortNoisyDelayedChainMDP(ShortDelayedChainMDP):
@@ -123,7 +123,7 @@ class LongDelayedChainMDP(DelayedChainMDP):
     name = "long"
     lowerbound = lower
     upperbound = upper_long
-    lrs = [20, 40, 80, 160, 320]
+    lrs = [20, 40, 80]
     kl_costs = [0.1, 0.5, 1]
 
 class LongNoisyDelayedChainMDP(LongDelayedChainMDP):

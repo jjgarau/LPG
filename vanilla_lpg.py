@@ -114,11 +114,11 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
             if vanilla:
                 loss = logp * ret
             else:
-                loss = logp * pi_hat - 0.001 * kl_cost * kl_term
+                loss = logp * pi_hat  # - 0.001 * kl_cost * kl_term
             loss = loss.mean()
 
             # Optimize
-            g = torch.autograd.grad(loss, agent.pi.parameters(), retain_graph=True, allow_unused=vanilla)
+            g = torch.autograd.grad(loss, agent.pi.parameters(), retain_graph=True, allow_unused=True)
             state_dict = agent.pi.state_dict()
             for i, (name, param) in enumerate(state_dict.items()):
                 # Gradient ascent
@@ -162,10 +162,11 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
         l2_y = torch.sum(torch.pow(y_hat, 2), dim=-1)
 
         # Compute meta gradients
-        meta_grad = logp * ret + beta0 * ent_pi + beta1 * ent_y - beta2 * l2_pi - beta3 * l2_y
+        # meta_grad = logp * ret + beta0 * ent_pi + beta1 * ent_y - beta2 * l2_pi - beta3 * l2_y
+        meta_grad = -1 * F.mse_loss(ret, pi_hat.unsqueeze(dim=0), reduction='none')
         meta_grad = meta_grad.mean()
 
-        meta_grad = torch.autograd.grad(meta_grad, meta_net.parameters(), retain_graph=False)
+        meta_grad = torch.autograd.grad(meta_grad, meta_net.parameters(), retain_graph=False, allow_unused=True)
 
         # return meta_grad.mean()
         return meta_grad
@@ -238,7 +239,8 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
                     meta_gradients = list(meta_grad)
                 else:
                     for i in range(len(meta_grad)):
-                        meta_gradients[i] = meta_gradients[i] + meta_grad[i]
+                        if meta_grad[i] is not None:
+                            meta_gradients[i] = meta_gradients[i] + meta_grad[i]
 
                 meta_counter += 1
                 agent_turn = True
@@ -247,7 +249,8 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
             agent.pi.to('cpu')
 
     for i in range(len(meta_gradients)):
-        meta_gradients[i] = meta_gradients[i] / meta_counter
+        if meta_gradients[i] is not None:
+            meta_gradients[i] = meta_gradients[i] / meta_counter
 
     # return meta_gradients / meta_counter, np.mean(returns)
     return meta_gradients, single_env_returns
@@ -322,7 +325,9 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
         state_dict = meta_net.state_dict()
         for i, (name, param) in enumerate(state_dict.items()):
             # Gradient ascent
-            state_dict[name] = state_dict[name] + args.meta_lr * sum(m[i] for m in lifetimes_meta_losses)
+            g = sum(m[i] for m in lifetimes_meta_losses if m[i] is not None)
+            if g is not None:
+                state_dict[name] = state_dict[name] + args.meta_lr * g
         meta_net.load_state_dict(state_dict)
 
         make_plot(data_y=all_returns, xlab='Meta iteration', ylab='Average return over lifetime',
@@ -359,14 +364,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Main script for running LPG")
     parser.add_argument('--lstm_hidden_size', type=int, default=64, help="Hidden size of the LSTM meta network")
     parser.add_argument('--m', type=int, default=5, help="Dimension of y vector")
-    parser.add_argument('--meta_lr', type=float, default=0.01, help="Learning rate for the meta network")
+    parser.add_argument('--meta_lr', type=float, default=0.1, help="Learning rate for the meta network")
     parser.add_argument('--train_pi_iters', type=int, default=5,
                         help="K, number of consecutive training iterations for the agent")
     parser.add_argument('--trajectory_steps', type=int, default=20, help="Number of steps between agent iterations")
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
     parser.add_argument('--num_meta_iterations', type=int, default=5000, help="Number of meta updates")
     parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=5e3, help="Number of timesteps per lifetime")
+    parser.add_argument('--lifetime_timesteps', type=int, default=3e3, help="Number of timesteps per lifetime")
     parser.add_argument('--parallel_environments', type=int, default=1, help="Number of parallel environments")
     parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
     parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
