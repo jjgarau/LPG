@@ -101,13 +101,14 @@ class Agent(nn.Module):
 
 class MetaLearnerNetwork(nn.Module):
 
-    def __init__(self, inp_dim, hidden_size, y_dim, round_y=False, device='cpu'):
+    def __init__(self, inp_dim, hidden_size, y_dim, round_y=False, device='cpu', num_layers=3):
         super().__init__()
         self.hidden_size = hidden_size
         self.round_y = round_y
+        self.num_layers = num_layers
 
         # Meta network
-        self.net = nn.GRU(input_size=inp_dim, hidden_size=hidden_size, batch_first=True)
+        self.net = nn.GRU(input_size=inp_dim, hidden_size=hidden_size, batch_first=True, num_layers=num_layers)
         self.fc_y = nn.Linear(hidden_size, y_dim)
         self.fc_pi = nn.Linear(hidden_size, 1)
 
@@ -146,19 +147,20 @@ class MetaLearnerNetwork(nn.Module):
         input = torch.cat((rew, done, gamma, prob, fi_y, fi_y1), dim=-1)
 
         # Initialize h vectors
-        h = torch.zeros((1, batch_size, self.hidden_size)).to(self.device)
+        h = torch.zeros((self.num_layers, batch_size, self.hidden_size)).to(self.device)
 
         # We process the input backwards
         input = torch.flip(input, dims=[1])
 
         # We initialize the output
-        output = torch.zeros((batch_size, rollout_size, self.hidden_size)).to(self.device)
+        # output = input.new_zeros((batch_size, rollout_size, self.hidden_size), requires_grad=True)
+        output = torch.zeros((batch_size, rollout_size, self.hidden_size))
 
         # GRU pass
         for i in range(rollout_size):
             # Reset h if episode is done
             done_filter = 1 - input[:, i:(i+1), 1]
-            done_filter = done_filter.unsqueeze(dim=0).repeat((1, 1, self.hidden_size))
+            done_filter = done_filter.unsqueeze(dim=0).repeat((self.num_layers, 1, self.hidden_size))
             h = h * done_filter
             inp = input[:, i:(i + 1), :]
             out, h = self.net(inp, h)

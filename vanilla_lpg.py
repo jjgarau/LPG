@@ -3,6 +3,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.optim import Adam
 import argparse
 from environments import get_env_dist
 from networks import MetaLearnerNetwork, Agent
@@ -133,7 +134,8 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
         obs, obs1, act, rew, done, ret = collect_data()
 
         # Obtain logp vector for s_t
-        pi, logp = agent.pi(obs, act.squeeze())
+        with torch.no_grad():
+            pi, logp = agent.pi(obs, act.squeeze())
 
         # Compute pi entropy
         ent_pi = pi.entropy()
@@ -170,9 +172,8 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
 
         aux.append(-1 * meta_grad.item())
 
-        meta_grad = torch.autograd.grad(meta_grad, meta_net.parameters(), retain_graph=False, allow_unused=True)
+        # meta_grad = torch.autograd.grad(meta_grad, meta_net.parameters(), retain_graph=False, allow_unused=True)
 
-        # return meta_grad.mean()
         return meta_grad
 
     # Prepare for interaction with environment
@@ -207,7 +208,8 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
 
             # Resetting the episode if current ended
             if d:
-                buf_list[i].finish_path()
+                if (t + 1) % trajectory_steps != 0:
+                    buf_list[i].finish_path()
                 single_env_returns[i].append(ep_ret[i])
                 o[i], ep_ret[i], ep_len[i] = env.reset(), 0, 0
 
@@ -239,12 +241,16 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
                     break
 
                 # Sum meta gradients
+                # if meta_gradients is None:
+                #     meta_gradients = list(meta_grad)
+                # else:
+                #     for i in range(len(meta_grad)):
+                #        if meta_grad[i] is not None:
+                #             meta_gradients[i] = meta_gradients[i] + meta_grad[i]
                 if meta_gradients is None:
-                    meta_gradients = list(meta_grad)
+                    meta_gradients = meta_grad
                 else:
-                    for i in range(len(meta_grad)):
-                        if meta_grad[i] is not None:
-                            meta_gradients[i] = meta_gradients[i] + meta_grad[i]
+                    meta_gradients = meta_gradients + meta_grad
 
                 meta_counter += 1
                 agent_turn = True
@@ -252,12 +258,12 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
             agent.to('cpu')
             agent.pi.to('cpu')
 
-    for i in range(len(meta_gradients)):
-        if meta_gradients[i] is not None:
-            meta_gradients[i] = meta_gradients[i] / meta_counter
+    # for i in range(len(meta_gradients)):
+    #     if meta_gradients[i] is not None:
+    #         meta_gradients[i] = meta_gradients[i] / meta_counter
 
-    # return meta_gradients / meta_counter, np.mean(returns)
-    return meta_gradients, single_env_returns
+    return meta_gradients / meta_counter, single_env_returns
+    # return meta_gradients, single_env_returns
 
 
 def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifetimes=1, seed=0, results_folder=None):
@@ -277,7 +283,7 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
     meta_net.to(device)
 
     # Set up optimizer for Metanetwork
-    # meta_optim = Adam(meta_net.parameters(), lr=args.meta_lr)
+    meta_optim = Adam(meta_net.parameters(), lr=args.meta_lr)
 
     # Tracking returns
     all_returns = []
@@ -287,10 +293,10 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
         print("Meta iteration", it + 1)
 
         # Initialize meta optim
-        # meta_optim.zero_grad()
+        meta_optim.zero_grad()
 
         # Clear gradients
-        meta_net.zero_grad()
+        # meta_net.zero_grad()
 
         lifetimes_meta_losses, lifetimes_returns = [], []
 
@@ -322,9 +328,9 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
         all_returns.append(lifetimes_returns)
 
         # Gradient ascent
-        # loss = -1 * sum(lifetimes_meta_losses) / len(lifetimes_meta_losses)
-        # loss.backward()
-        # meta_optim.step()
+        loss = -1 * sum(lifetimes_meta_losses) / len(lifetimes_meta_losses)
+        loss.backward()
+        meta_optim.step()
 
         import matplotlib.pyplot as plt
         plt.plot(aux)
@@ -332,13 +338,13 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
         plt.close()
         # aux.clear()
 
-        state_dict = meta_net.state_dict()
-        for i, (name, param) in enumerate(state_dict.items()):
+        # state_dict = meta_net.state_dict()
+        # for i, (name, param) in enumerate(state_dict.items()):
             # Gradient ascent
-            g = sum(m[i] for m in lifetimes_meta_losses if m[i] is not None)
-            if g is not None:
-                state_dict[name] = state_dict[name] + args.meta_lr * g
-        meta_net.load_state_dict(state_dict)
+        #     g = sum(m[i] for m in lifetimes_meta_losses if m[i] is not None)
+        #     if g is not None:
+        #         state_dict[name] = state_dict[name] + args.meta_lr * g
+        # meta_net.load_state_dict(state_dict)
 
         make_plot(data_y=all_returns, xlab='Meta iteration', ylab='Average return over lifetime',
                   path=os.path.join(results_folder, 'returns.pdf'), plot_ci=False)
@@ -372,16 +378,16 @@ if __name__ == "__main__":
     # torch.autograd.set_detect_anomaly(True)
 
     parser = argparse.ArgumentParser(description="Main script for running LPG")
-    parser.add_argument('--lstm_hidden_size', type=int, default=64, help="Hidden size of the LSTM meta network")
+    parser.add_argument('--lstm_hidden_size', type=int, default=256, help="Hidden size of the LSTM meta network")
     parser.add_argument('--m', type=int, default=5, help="Dimension of y vector")
-    parser.add_argument('--meta_lr', type=float, default=0.01, help="Learning rate for the meta network")
+    parser.add_argument('--meta_lr', type=float, default=0.001, help="Learning rate for the meta network")
     parser.add_argument('--train_pi_iters', type=int, default=5,
                         help="K, number of consecutive training iterations for the agent")
     parser.add_argument('--trajectory_steps', type=int, default=20, help="Number of steps between agent iterations")
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
     parser.add_argument('--num_meta_iterations', type=int, default=5000, help="Number of meta updates")
     parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=5e3, help="Number of timesteps per lifetime")
+    parser.add_argument('--lifetime_timesteps', type=int, default=2e3, help="Number of timesteps per lifetime")
     parser.add_argument('--parallel_environments', type=int, default=1, help="Number of parallel environments")
     parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
     parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
