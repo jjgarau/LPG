@@ -10,7 +10,7 @@ from utils import ParameterBandit, combined_shape, discount_cumsum, moving_avera
 import os
 import datetime
 import json
-
+aux = []
 
 class DataBuffer:
 
@@ -104,6 +104,7 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
             # Obtain the y vector for s_t and s_t+1
             y = agent.pi.prediction_vector(obs)
             y1 = agent.pi.prediction_vector(obs1)
+            y, y1 = torch.zeros_like(y), torch.zeros_like(y1)
 
             # Compute pi_hat and y_hat
             inp = (rew, done, args.gamma, torch.exp(logp), y, y1)
@@ -144,6 +145,7 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
         # Obtain the y vector for s_t and s_t+1
         y = agent.pi.prediction_vector(obs)
         y1 = agent.pi.prediction_vector(obs1)
+        y, y1 = torch.zeros_like(y), torch.zeros_like(y1)
 
         # Compute y entropy
         ent_y = - y * torch.log2(y + eps) - (1 - y) * torch.log2(1 - y + eps)
@@ -165,6 +167,8 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
         # meta_grad = logp * ret + beta0 * ent_pi + beta1 * ent_y - beta2 * l2_pi - beta3 * l2_y
         meta_grad = -1 * F.mse_loss(ret, pi_hat.unsqueeze(dim=0), reduction='none')
         meta_grad = meta_grad.mean()
+
+        aux.append(-1 * meta_grad.item())
 
         meta_grad = torch.autograd.grad(meta_grad, meta_net.parameters(), retain_graph=False, allow_unused=True)
 
@@ -321,6 +325,12 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
         # loss = -1 * sum(lifetimes_meta_losses) / len(lifetimes_meta_losses)
         # loss.backward()
         # meta_optim.step()
+
+        import matplotlib.pyplot as plt
+        plt.plot(aux)
+        plt.savefig(os.path.join(results_folder, 'loss.pdf'))
+        plt.close()
+        # aux.clear()
 
         state_dict = meta_net.state_dict()
         for i, (name, param) in enumerate(state_dict.items()):
