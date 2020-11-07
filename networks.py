@@ -170,6 +170,9 @@ class MetaLearnerNetwork(nn.Module):
         if self.round_y:
             y = torch.round(y)
         pi = self.fc_pi(output)
+
+        # Flip the input back
+        pi, y = torch.flip(pi, [1]), torch.flip(y, [1])
         pi, y = pi.squeeze(), y.squeeze()
 
         return pi, y
