@@ -149,7 +149,7 @@ class MetaLearnerNetwork(nn.Module):
 
         # We process the input backwards
         input = torch.flip(input, dims=[1])
-        input_merge = input.view(-1, 6)
+        input_merge = input.view(-1, 6).to(self.device)
 
         def GRU_packed_seq():
 
@@ -202,7 +202,7 @@ class MetaLearnerNetwork(nn.Module):
             output[slices[-1].item():, :] = pad_output[-1, :lengths[-1].item(), :]
 
             # Return output to (batch, rollout, hidden_size) shape
-            output = output.view(batch_size, rollout_size, -1)
+            output = output.view(batch_size, rollout_size, -1).to(self.device)
 
             return output
 
