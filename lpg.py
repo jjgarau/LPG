@@ -232,7 +232,7 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
                 # Compute meta gradient of the rollout
                 can_break = True if t + 1 > 10 * trajectory_steps and not args.vanilla else False
                 can_break = False
-                meta_grad = get_meta_gradient(can_break=can_break)
+                meta_grad = get_meta_gradient(can_break=can_break, mse_loss=args.mse_loss)
 
                 # Break to prevent early divergence
                 if meta_grad is None:
