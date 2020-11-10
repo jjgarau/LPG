@@ -172,7 +172,7 @@ class MetaLearnerNetwork(nn.Module):
             seq_tensor[-1, :lengths[-1].item(), :] = input[:, slices[-1].item():, :]
 
             # Compute the packed input
-            packed_input = pack_padded_sequence(seq_tensor, lengths, batch_first=True, enforce_sorted=False)
+            packed_input = pack_padded_sequence(seq_tensor, lengths.to('cpu'), batch_first=True, enforce_sorted=False)
 
             # Do the network pass
             packed_output, _ = self.net(packed_input)

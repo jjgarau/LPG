@@ -369,9 +369,10 @@ if __name__ == "__main__":
     parser.add_argument('--beta3', type=float, default=0.0, help="L2 regularization wright for y hat, beta 3 (default: 0.001)")
     parser.add_argument('--vanilla', type=bool, default=False, help="Run a vanilla LPG to debug")
     parser.add_argument('--mse_loss', type=bool, default=True, help="Run a MSE loss on the meta learner wrt returns")
+    parser.add_argument('--use_gpu', type=bool, default=True, help="Run GPU if available")
     args = parser.parse_args()
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda' if torch.cuda.is_available() and args.use_gpu else 'cpu'
 
     print('CUDA Available:', torch.cuda.is_available())
 
