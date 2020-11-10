@@ -227,7 +227,7 @@ class MetaLearnerNetwork(nn.Module):
             return output
 
         # Do a GRU pass using the packed sequence method if the batch size is 1
-        output = GRU_packed_seq() if batch_size <= 4 else GRU_pass_for()
+        output = GRU_packed_seq() if True else GRU_pass_for()
 
         # Computing y_hat and pi_hat
         y = self.fc_y(output)
