@@ -128,7 +128,7 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
                     state_dict[name] = state_dict[name] + lr * g[i]
             agent.pi.load_state_dict(state_dict)
 
-    def get_meta_gradient(eps=1e-7, eps_ent=1e-3, can_break=True):
+    def get_meta_gradient(eps=1e-7, eps_ent=1e-3, can_break=True, mse_loss=False):
 
         # Get data
         obs, obs1, act, rew, done, ret = collect_data()
@@ -166,7 +166,10 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
         l2_y = torch.sum(torch.pow(y_hat, 2), dim=-1)
 
         # Compute meta gradients
-        meta_grad = logp * ret + beta0 * ent_pi + beta1 * ent_y - beta2 * l2_pi - beta3 * l2_y
+        if mse_loss:
+            meta_grad = -1 * F.mse_loss(ret, pi_hat, reduction='none')
+        else:
+            meta_grad = logp * ret + beta0 * ent_pi + beta1 * ent_y - beta2 * l2_pi - beta3 * l2_y
         meta_grad = meta_grad.mean()
 
         return meta_grad
@@ -354,17 +357,18 @@ if __name__ == "__main__":
     parser.add_argument('--meta_lr', type=float, default=0.001, help="Learning rate for the meta network")
     parser.add_argument('--train_pi_iters', type=int, default=5,
                         help="K, number of consecutive training iterations for the agent")
-    parser.add_argument('--trajectory_steps', type=int, default=256, help="Number of steps between agent iterations")
+    parser.add_argument('--trajectory_steps', type=int, default=512, help="Number of steps between agent iterations")
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
     parser.add_argument('--num_meta_iterations', type=int, default=5000, help="Number of meta updates")
     parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=5e3, help="Number of timesteps per lifetime")
+    parser.add_argument('--lifetime_timesteps', type=int, default=1e4, help="Number of timesteps per lifetime")
     parser.add_argument('--parallel_environments', type=int, default=1, help="Number of parallel environments")
-    parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
-    parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
-    parser.add_argument('--beta2', type=float, default=0.001, help="L2 regularization weight for pi hat, beta 2")
-    parser.add_argument('--beta3', type=float, default=0.001, help="L2 regularization wright for y hat, beta 3")
+    parser.add_argument('--beta0', type=float, default=0.0, help="Policy entropy cost, beta 0 (default: 0.01)")
+    parser.add_argument('--beta1', type=float, default=0.0, help="Prediction entropy cost, beta 1 (default: 0.001)")
+    parser.add_argument('--beta2', type=float, default=0.0, help="L2 regularization weight for pi hat, beta 2 (default: 0.001)")
+    parser.add_argument('--beta3', type=float, default=0.0, help="L2 regularization wright for y hat, beta 3 (default: 0.001)")
     parser.add_argument('--vanilla', type=bool, default=False, help="Run a vanilla LPG to debug")
+    parser.add_argument('--mse_loss', type=bool, default=True, help="Run a MSE loss on the meta learner wrt returns")
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
