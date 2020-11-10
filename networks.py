@@ -157,12 +157,12 @@ class MetaLearnerNetwork(nn.Module):
 
             # Add a 0 in the first position if the is an unfinished episode in the batch
             if slices[0].item() > 0:
-                slices = torch.cat([torch.Tensor([0]), slices]).type(torch.int)
+                slices = torch.cat([torch.Tensor([0]).to(self.device), slices]).type(torch.int)
             num_ep = slices.shape[0]
 
             # Compute the episode lengths
             lengths = slices[1:] - slices[:-1]
-            lengths = torch.cat([lengths, torch.Tensor([rollout_size - torch.sum(lengths)])]).type(torch.int)
+            lengths = torch.cat([lengths, torch.Tensor([rollout_size - torch.sum(lengths)]).to(self.device)]).type(torch.int)
             max_len = torch.max(lengths).item()
 
             # Create an empty sequence tensor and fill it with episode data
