@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 from torch.distributions.normal import Normal
 from gym.spaces import Box, Discrete
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
 class AgentNetwork(nn.Module):
@@ -146,25 +147,69 @@ class MetaLearnerNetwork(nn.Module):
         gamma = gamma * torch.ones_like(prob)
         input = torch.cat((rew, done, gamma, prob, fi_y, fi_y1), dim=-1)
 
-        # Initialize h vectors
-        h = torch.zeros((self.num_layers, batch_size, self.hidden_size)).to(self.device)
-
         # We process the input backwards
         input = torch.flip(input, dims=[1])
 
-        # We initialize the output
-        # output = input.new_zeros((batch_size, rollout_size, self.hidden_size), requires_grad=True)
-        output = torch.zeros((batch_size, rollout_size, self.hidden_size))
+        def GRU_packed_seq():
 
-        # GRU pass
-        for i in range(rollout_size):
-            # Reset h if episode is done
-            done_filter = 1 - input[:, i:(i+1), 1]
-            done_filter = done_filter.unsqueeze(dim=0).repeat((self.num_layers, 1, self.hidden_size))
-            h = h * done_filter
-            inp = input[:, i:(i + 1), :]
-            out, h = self.net(inp, h)
-            output[:, i:(i+1), :] = out
+            # Get slices of the different episodes
+            slices = torch.nonzero(input[:, :, 1].squeeze()).squeeze()
+
+            # Add a 0 in the first position if the is an unfinished episode in the batch
+            if slices[0].item() > 0:
+                slices = torch.cat([torch.Tensor([0]), slices]).type(torch.int)
+            num_ep = slices.shape[0]
+
+            # Compute the episode lengths
+            lengths = slices[1:] - slices[:-1]
+            lengths = torch.cat([lengths, torch.Tensor([rollout_size - torch.sum(lengths)])]).type(torch.int)
+            max_len = torch.max(lengths).item()
+
+            # Create an empty sequence tensor and fill it with episode data
+            seq_tensor = torch.zeros((num_ep, max_len, 6)).to(self.device)
+            for i in range(lengths.shape[0] - 1):
+                seq_tensor[i, :lengths[i].item(), :] = input[:, slices[i].item():slices[i + 1].item(), :]
+            seq_tensor[-1, :lengths[-1].item(), :] = input[:, slices[-1].item():, :]
+
+            # Compute the packed input
+            packed_input = pack_padded_sequence(seq_tensor, lengths, batch_first=True, enforce_sorted=False)
+
+            # Do the network pass
+            packed_output, _ = self.net(packed_input)
+
+            # Compute padded output
+            pad_output, input_sizes = pad_packed_sequence(packed_output, batch_first=True)
+
+            # Retrieve episode data and merge it into a single tensor
+            output = torch.zeros((batch_size, rollout_size, self.hidden_size)).to(self.device)
+            for i in range(lengths.shape[0] - 1):
+                output[:, slices[i].item():slices[i + 1].item(), :] = pad_output[i, :lengths[i].item(), :]
+            output[:, slices[-1].item():, :] = pad_output[-1, :lengths[-1].item(), :]
+
+            return output
+
+        def GRU_pass_for():
+
+            # Initialize h vectors
+            h = torch.zeros((self.num_layers, batch_size, self.hidden_size)).to(self.device)
+
+            # We initialize the output
+            output = torch.zeros((batch_size, rollout_size, self.hidden_size))
+
+            # GRU pass
+            for i in range(rollout_size):
+                # Reset h if episode is done
+                done_filter = 1 - input[:, i:(i+1), 1]
+                done_filter = done_filter.unsqueeze(dim=0).repeat((self.num_layers, 1, self.hidden_size))
+                h = h * done_filter
+                inp = input[:, i:(i + 1), :]
+                out, h = self.net(inp, h)
+                output[:, i:(i+1), :] = out
+
+            return output
+
+        # Do a GRU pass using the packed sequence method if the batch size is 1
+        output = GRU_packed_seq() if batch_size == 1 else GRU_pass_for()
 
         # Computing y_hat and pi_hat
         y = self.fc_y(output)
@@ -175,6 +220,6 @@ class MetaLearnerNetwork(nn.Module):
 
         # Flip the input back
         pi, y = torch.flip(pi, [1]), torch.flip(y, [1])
-        pi, y = pi.squeeze(), y.squeeze()
+        pi, y = pi.squeeze(dim=-1), y.squeeze(dim=-1)
 
         return pi, y
