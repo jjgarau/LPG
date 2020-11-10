@@ -11,6 +11,7 @@ from utils import ParameterBandit, combined_shape, discount_cumsum, moving_avera
 import os
 import datetime
 import json
+import csv
 aux = []
 
 class DataBuffer:
@@ -145,9 +146,10 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
             return None
 
         # Obtain the y vector for s_t and s_t+1
-        y = agent.pi.prediction_vector(obs)
-        y1 = agent.pi.prediction_vector(obs1)
-        y, y1 = torch.zeros_like(y), torch.zeros_like(y1)
+        with torch.no_grad():
+            y = agent.pi.prediction_vector(obs)
+            y1 = agent.pi.prediction_vector(obs1)
+            y, y1 = torch.zeros_like(y), torch.zeros_like(y1)
 
         # Compute y entropy
         ent_y = - y * torch.log2(y + eps) - (1 - y) * torch.log2(1 - y + eps)
@@ -167,7 +169,7 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
 
         # Compute meta gradients
         # meta_grad = logp * ret + beta0 * ent_pi + beta1 * ent_y - beta2 * l2_pi - beta3 * l2_y
-        meta_grad = -1 * F.mse_loss(ret, pi_hat.unsqueeze(dim=0), reduction='none')
+        meta_grad = -1 * F.mse_loss(ret, pi_hat, reduction='none')
         meta_grad = meta_grad.mean()
 
         aux.append(-1 * meta_grad.item())
@@ -357,6 +359,12 @@ def train_lpg(env_dist, init_agent_param_dist, num_meta_iterations=5, num_lifeti
 
         torch.save(meta_net, os.path.join(results_folder, 'model.pkl'))
 
+        with open(os.path.join(results_folder, 'returns.csv'), 'w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(["Lifetime", "Return"])
+            for i, r in enumerate(all_returns):
+                writer.writerow([i, np.mean(r)])
+
 
 def lpg():
     os.makedirs('results', exist_ok=True)
@@ -378,16 +386,16 @@ if __name__ == "__main__":
     # torch.autograd.set_detect_anomaly(True)
 
     parser = argparse.ArgumentParser(description="Main script for running LPG")
-    parser.add_argument('--lstm_hidden_size', type=int, default=256, help="Hidden size of the LSTM meta network")
+    parser.add_argument('--lstm_hidden_size', type=int, default=32, help="Hidden size of the LSTM meta network")
     parser.add_argument('--m', type=int, default=5, help="Dimension of y vector")
     parser.add_argument('--meta_lr', type=float, default=0.001, help="Learning rate for the meta network")
     parser.add_argument('--train_pi_iters', type=int, default=5,
                         help="K, number of consecutive training iterations for the agent")
-    parser.add_argument('--trajectory_steps', type=int, default=20, help="Number of steps between agent iterations")
+    parser.add_argument('--trajectory_steps', type=int, default=256, help="Number of steps between agent iterations")
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
     parser.add_argument('--num_meta_iterations', type=int, default=5000, help="Number of meta updates")
     parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=2e3, help="Number of timesteps per lifetime")
+    parser.add_argument('--lifetime_timesteps', type=int, default=5e3, help="Number of timesteps per lifetime")
     parser.add_argument('--parallel_environments', type=int, default=1, help="Number of parallel environments")
     parser.add_argument('--beta0', type=float, default=0.01, help="Policy entropy cost, beta 0")
     parser.add_argument('--beta1', type=float, default=0.001, help="Prediction entropy cost, beta 1")
