@@ -149,27 +149,42 @@ class MetaLearnerNetwork(nn.Module):
 
         # We process the input backwards
         input = torch.flip(input, dims=[1])
+        input_merge = input.view(-1, 6)
 
         def GRU_packed_seq():
 
             # Get slices of the different episodes
-            slices = torch.nonzero(input[:, :, 1].squeeze()).squeeze()
+            slices = torch.nonzero(input[:, :, 1])
+            num_eps = torch.bincount(slices[:, 0])
+            num_eps_sum = torch.cumsum(num_eps, dim=0)
 
             # Add a 0 in the first position if the is an unfinished episode in the batch
-            if slices[0].item() > 0:
-                slices = torch.cat([torch.Tensor([0]).to(self.device), slices]).type(torch.int)
+            num_unfinished_episodes = 0
+            if slices[0, 1].item() > 0:
+                slices = torch.cat([torch.Tensor([[0, 0]]).to(self.device), slices], dim=0).type(torch.int)
+                num_unfinished_episodes += 1
+            for i in range(num_eps_sum.shape[0] - 1):
+                if slices[num_eps_sum[i].item() + num_unfinished_episodes, 1].item() > 0:
+                    slices = torch.cat([
+                        slices[:num_eps_sum[i].item() + num_unfinished_episodes, :],
+                        torch.Tensor([[i + 1, 0]]).to(self.device),
+                        slices[num_eps_sum[i].item() + num_unfinished_episodes:, :]
+                    ], dim=0).type(torch.int)
+                    num_unfinished_episodes += 1
+            slices = slices[:, 0] * rollout_size + slices[:, 1]
             num_ep = slices.shape[0]
 
             # Compute the episode lengths
             lengths = slices[1:] - slices[:-1]
-            lengths = torch.cat([lengths, torch.Tensor([rollout_size - torch.sum(lengths)]).to(self.device)]).type(torch.int)
+            lengths = torch.cat([lengths, torch.Tensor([rollout_size * batch_size -
+                                                        torch.sum(lengths)]).to(self.device)]).type(torch.int)
             max_len = torch.max(lengths).item()
 
             # Create an empty sequence tensor and fill it with episode data
             seq_tensor = torch.zeros((num_ep, max_len, 6)).to(self.device)
             for i in range(lengths.shape[0] - 1):
-                seq_tensor[i, :lengths[i].item(), :] = input[:, slices[i].item():slices[i + 1].item(), :]
-            seq_tensor[-1, :lengths[-1].item(), :] = input[:, slices[-1].item():, :]
+                seq_tensor[i, :lengths[i].item(), :] = input_merge[slices[i].item():slices[i + 1].item(), :]
+            seq_tensor[-1, :lengths[-1].item(), :] = input_merge[slices[-1].item():, :]
 
             # Compute the packed input
             packed_input = pack_padded_sequence(seq_tensor, lengths.to('cpu'), batch_first=True, enforce_sorted=False)
@@ -181,10 +196,13 @@ class MetaLearnerNetwork(nn.Module):
             pad_output, input_sizes = pad_packed_sequence(packed_output, batch_first=True)
 
             # Retrieve episode data and merge it into a single tensor
-            output = torch.zeros((batch_size, rollout_size, self.hidden_size)).to(self.device)
+            output = torch.zeros((batch_size * rollout_size, self.hidden_size)).to(self.device)
             for i in range(lengths.shape[0] - 1):
-                output[:, slices[i].item():slices[i + 1].item(), :] = pad_output[i, :lengths[i].item(), :]
-            output[:, slices[-1].item():, :] = pad_output[-1, :lengths[-1].item(), :]
+                output[slices[i].item():slices[i + 1].item(), :] = pad_output[i, :lengths[i].item(), :]
+            output[slices[-1].item():, :] = pad_output[-1, :lengths[-1].item(), :]
+
+            # Return output to (batch, rollout, hidden_size) shape
+            output = output.view(batch_size, rollout_size, -1)
 
             return output
 
@@ -209,7 +227,7 @@ class MetaLearnerNetwork(nn.Module):
             return output
 
         # Do a GRU pass using the packed sequence method if the batch size is 1
-        output = GRU_packed_seq() if batch_size == 1 else GRU_pass_for()
+        output = GRU_packed_seq() if batch_size <= 4 else GRU_pass_for()
 
         # Computing y_hat and pi_hat
         y = self.fc_y(output)

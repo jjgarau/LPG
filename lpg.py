@@ -352,17 +352,17 @@ def lpg():
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Main script for running LPG")
-    parser.add_argument('--lstm_hidden_size', type=int, default=32, help="Hidden size of the LSTM meta network")
+    parser.add_argument('--lstm_hidden_size', type=int, default=256, help="Hidden size of the LSTM meta network")
     parser.add_argument('--m', type=int, default=5, help="Dimension of y vector")
     parser.add_argument('--meta_lr', type=float, default=0.001, help="Learning rate for the meta network")
     parser.add_argument('--train_pi_iters', type=int, default=5,
                         help="K, number of consecutive training iterations for the agent")
-    parser.add_argument('--trajectory_steps', type=int, default=512, help="Number of steps between agent iterations")
+    parser.add_argument('--trajectory_steps', type=int, default=64, help="Number of steps between agent iterations")
     parser.add_argument('--gamma', type=float, default=0.995, help="Discount factor")
     parser.add_argument('--num_meta_iterations', type=int, default=5000, help="Number of meta updates")
     parser.add_argument('--num_lifetimes', type=int, default=1, help="Number of parallel lifetimes")
-    parser.add_argument('--lifetime_timesteps', type=int, default=1e4, help="Number of timesteps per lifetime")
-    parser.add_argument('--parallel_environments', type=int, default=1, help="Number of parallel environments")
+    parser.add_argument('--lifetime_timesteps', type=int, default=2e4, help="Number of timesteps per lifetime")
+    parser.add_argument('--parallel_environments', type=int, default=4, help="Number of parallel environments")
     parser.add_argument('--beta0', type=float, default=0.0, help="Policy entropy cost, beta 0 (default: 0.01)")
     parser.add_argument('--beta1', type=float, default=0.0, help="Prediction entropy cost, beta 1 (default: 0.001)")
     parser.add_argument('--beta2', type=float, default=0.0, help="L2 regularization weight for pi hat, beta 2 (default: 0.001)")
