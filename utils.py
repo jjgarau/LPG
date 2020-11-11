@@ -2,6 +2,7 @@ import numpy as np
 from scipy.signal import lfilter
 from scipy.stats import sem, t
 import matplotlib.pyplot as plt
+import argparse
 
 
 class ParameterBandit:
@@ -87,3 +88,14 @@ def make_plot(data_y, xlab, ylab, path, func=lambda x: x, confidence=0.95, plot_
     ax.set_ylim(-1, 1)
     f.savefig(path, bbox_inches='tight')
     plt.close(fig=f)
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+       return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')

@@ -7,7 +7,7 @@ from torch.optim import Adam
 import argparse
 from environments import get_env_dist
 from networks import MetaLearnerNetwork, Agent
-from utils import ParameterBandit, combined_shape, discount_cumsum, moving_average, make_plot
+from utils import ParameterBandit, combined_shape, discount_cumsum, moving_average, make_plot, str2bool
 import os
 import datetime
 import json
@@ -367,9 +367,9 @@ if __name__ == "__main__":
     parser.add_argument('--beta1', type=float, default=0.0, help="Prediction entropy cost, beta 1 (default: 0.001)")
     parser.add_argument('--beta2', type=float, default=0.0, help="L2 regularization weight for pi hat, beta 2 (default: 0.001)")
     parser.add_argument('--beta3', type=float, default=0.0, help="L2 regularization wright for y hat, beta 3 (default: 0.001)")
-    parser.add_argument('--vanilla', type=bool, default=False, help="Run a vanilla LPG to debug")
-    parser.add_argument('--mse_loss', type=bool, default=True, help="Run a MSE loss on the meta learner wrt returns")
-    parser.add_argument('--use_gpu', type=bool, default=True, help="Run GPU if available")
+    parser.add_argument('--vanilla', type=str2bool, default=False, help="Run a vanilla LPG to debug")
+    parser.add_argument('--mse_loss', type=str2bool, default=True, help="Run a MSE loss on the meta learner wrt returns")
+    parser.add_argument('--use_gpu', type=str2bool, default=True, help="Run GPU if available")
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() and args.use_gpu else 'cpu'
