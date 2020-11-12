@@ -230,8 +230,7 @@ def train_agent(env_list, meta_net, lr, kl_cost, lifetime_timesteps=1e3, beta0=0
             else:
 
                 # Compute meta gradient of the rollout
-                can_break = True if t + 1 > 10 * trajectory_steps and not args.vanilla else False
-                can_break = False
+                can_break = True if t + 1 > 10 * trajectory_steps and not args.vanilla and args.can_break else False
                 meta_grad = get_meta_gradient(can_break=can_break, mse_loss=args.mse_loss)
 
                 # Break to prevent early divergence
@@ -370,6 +369,7 @@ if __name__ == "__main__":
     parser.add_argument('--vanilla', type=str2bool, default=False, help="Run a vanilla LPG to debug")
     parser.add_argument('--mse_loss', type=str2bool, default=True, help="Run a MSE loss on the meta learner wrt returns")
     parser.add_argument('--use_gpu', type=str2bool, default=True, help="Run GPU if available")
+    parser.add_argument('--can_break', type=str2bool, default=False, help="Allow the lifetime to end if the policy becomes deterministic")
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() and args.use_gpu else 'cpu'
