@@ -8,5 +8,5 @@
 .idea/inspectionProfiles/profiles_settings.xml
 *.pyc
 spinup/*
-*.png
+r*.png
 results/*
