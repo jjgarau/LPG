@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.signal import lfilter
 from scipy.stats import sem, t
+import matplotlib
 import matplotlib.pyplot as plt
 import argparse
 
@@ -63,7 +64,14 @@ def moving_average(a, n=10):
     return ret[n - 1:] / n
 
 
-def make_plot(data_y, xlab, ylab, path, func=lambda x: x, confidence=0.95, plot_ci=True):
+def make_plot(data_y, xlab, ylab, path, func=lambda x: x, confidence=0.95, plot_ci=True, font=None):
+
+    if font is None:
+        font = {'family': 'normal',
+                'size': 20}
+
+    matplotlib.rc('font', **font)
+
     f, ax = plt.subplots(**{'figsize': (12, 8)})
     ax.grid(color='#c7c7c7', linestyle='--', linewidth=1)
 
